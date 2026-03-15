@@ -54,6 +54,11 @@ export class VmServiceClient {
     return this._connected && this.ws?.readyState === WebSocket.OPEN;
   }
 
+  /** Get the final WebSocket URL (may differ from constructor URL after redirects). */
+  getUrl(): string {
+    return this.wsUrl;
+  }
+
   /**
    * Open the WebSocket connection to the VM service.
    *
@@ -220,10 +225,12 @@ export class VmServiceClient {
     }
 
     // Response to a pending call
-    if (typeof msg["id"] === "number") {
-      const pending = this.pending.get(msg["id"]);
+    // DDS (via json_rpc_2) may return IDs as strings even if we sent integers
+    const msgId = typeof msg["id"] === "string" ? parseInt(msg["id"], 10) : msg["id"];
+    if (typeof msgId === "number" && !isNaN(msgId)) {
+      const pending = this.pending.get(msgId);
       if (pending) {
-        this.pending.delete(msg["id"]);
+        this.pending.delete(msgId);
         clearTimeout(pending.timer);
 
         if (msg["error"]) {

@@ -15,3 +15,6 @@ test-ai.ts
 test-compression.ts
 test-quick.ts
 test-flutter.ts
+test-metroping-e2e.ts
+test-full-demo.ts
+demo-output/

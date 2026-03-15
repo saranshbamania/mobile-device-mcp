@@ -32,15 +32,20 @@ export function registerFlutterTools(
       description:
         "Discover and connect to a running Flutter app on the device via the Dart VM Service Protocol. " +
         "The app must be running in debug or profile mode. Returns connection details including the " +
-        "isolate ID and app name. Call this before using other flutter_* tools.",
+        "isolate ID and app name. Call this before using other flutter_* tools. " +
+        "Optionally pass vm_service_url from 'flutter run' output if auto-discovery fails.",
       inputSchema: z.object({
         device_id: z.string().describe("Device serial ID"),
+        vm_service_url: z.string().optional().describe(
+          "Optional: VM service URL from 'flutter run' output (e.g., http://127.0.0.1:PORT/TOKEN=/). " +
+          "Pass this if auto-discovery fails (logcat rotated).",
+        ),
       }),
     },
-    async ({ device_id }) => {
+    async ({ device_id, vm_service_url }) => {
       try {
         const flutter = getFlutter();
-        const conn = await flutter.connect(device_id);
+        const conn = await flutter.connect(device_id, vm_service_url);
         return {
           content: [{
             type: "text" as const,

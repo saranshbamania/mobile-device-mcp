@@ -449,14 +449,26 @@ export class AndroidDriver implements DeviceDriver {
     );
 
     if (result.exitCode === 0) {
-      // Look for: mResumedActivity: ActivityRecord{... com.package/.ActivityName ...}
+      // Android 16+: "ResumedActivity:" or "Resumed:"
+      // Android 8-15: "mResumedActivity:"
       const resumedMatch = result.stdout.match(
-        /mResumedActivity:.*?([a-zA-Z][a-zA-Z0-9_.]*[a-zA-Z0-9])\/([a-zA-Z0-9_.]+)/,
+        /(?:m?ResumedActivity|Resumed):.*?([a-zA-Z][a-zA-Z0-9_.]*[a-zA-Z0-9])\/([a-zA-Z0-9_.]+)/,
       );
       if (resumedMatch) {
         return {
           packageName: resumedMatch[1],
           activityName: resumedMatch[2],
+        };
+      }
+
+      // Also try mFocusedApp (works on all versions)
+      const focusedApp = result.stdout.match(
+        /mFocusedApp=.*?([a-zA-Z][a-zA-Z0-9_.]*[a-zA-Z0-9])\/([a-zA-Z0-9_.]+)/,
+      );
+      if (focusedApp) {
+        return {
+          packageName: focusedApp[1],
+          activityName: focusedApp[2],
         };
       }
     }

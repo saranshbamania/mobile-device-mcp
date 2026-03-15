@@ -82,24 +82,27 @@ export class FlutterDriver {
    *   3. Connect WebSocket
    *   4. Find Flutter isolate with inspector extensions
    */
-  async connect(deviceId: string): Promise<FlutterConnection> {
+  async connect(deviceId: string, vmServiceUrl?: string): Promise<FlutterConnection> {
     // If already connected, disconnect first
     if (this.isConnected) {
       await this.disconnect();
     }
 
-    // Step 1: Discover VM service URL
-    const vmServiceUrl = await this.discoverVmServiceUrl(deviceId);
+    // Step 1: Discover or use provided VM service URL
+    const resolvedUrl = vmServiceUrl || await this.discoverVmServiceUrl(deviceId);
 
-    // Step 2: Parse URL and forward port
-    const url = new URL(vmServiceUrl);
+    // Step 2: Parse URL and forward port (only for device-local URLs)
+    const url = new URL(resolvedUrl);
     const port = parseInt(url.port, 10);
-    await this.forwardPort(deviceId, port);
+    if (!vmServiceUrl) {
+      // Only forward when we discovered from logcat (device-local URL)
+      await this.forwardPort(deviceId, port);
+    }
 
     // Step 3: Convert to WebSocket URL
-    const wsUrl = vmServiceUrl.replace(/^http/, "ws").replace(/\/$/, "") + "/ws";
+    const wsUrl = resolvedUrl.replace(/^http/, "ws").replace(/\/$/, "") + "/ws";
 
-    // Step 4: Connect WebSocket
+    // Step 4: Connect WebSocket (follows DDS 302 redirects automatically)
     this.client = new VmServiceClient(wsUrl);
     await this.client.connect();
 
@@ -108,8 +111,8 @@ export class FlutterDriver {
     this.isolateId = isolateId;
 
     this.connection = {
-      vmServiceUrl,
-      wsUrl,
+      vmServiceUrl: resolvedUrl,
+      wsUrl: this.client.getUrl(),
       isolateId,
       appName,
     };
@@ -314,14 +317,28 @@ export class FlutterDriver {
 
   /**
    * Toggle the debug paint overlay on the device.
+   *
+   * Uses the rendering extension `ext.flutter.debugPaint` which is
+   * registered by RendererBinding via registerBoolServiceExtension.
+   * The VM service layer converts all param values to strings, so we
+   * send booleans here (matching what Flutter DevTools sends) and let
+   * the protocol handle serialisation.
+   *
+   * If the isolate has become stale (e.g. after a hot restart) we
+   * attempt to re-discover the Flutter isolate and retry once.
    */
   async toggleDebugPaint(enabled: boolean): Promise<void> {
     this.assertConnected();
 
+    // Validate the extension is registered before calling it.
+    // After a hot restart the old isolate may be gone and a new one
+    // will have re-registered its extensions.
+    const isolateId = await this.ensureValidIsolate();
+
     await this.client!.callExtension(
       "ext.flutter.debugPaint",
-      this.isolateId!,
-      { enabled: enabled.toString() },
+      isolateId,
+      { enabled },
     );
   }
 
@@ -331,9 +348,10 @@ export class FlutterDriver {
   async dumpRenderTree(): Promise<string> {
     this.assertConnected();
 
+    const isolateId = await this.ensureValidIsolate();
     const result = await this.client!.callExtension(
       "ext.flutter.debugDumpRenderTree",
-      this.isolateId!,
+      isolateId,
     ) as { result?: string };
 
     return result.result || "";
@@ -345,9 +363,10 @@ export class FlutterDriver {
   async dumpWidgetTree(): Promise<string> {
     this.assertConnected();
 
+    const isolateId = await this.ensureValidIsolate();
     const result = await this.client!.callExtension(
       "ext.flutter.debugDumpApp",
-      this.isolateId!,
+      isolateId,
     ) as { result?: string };
 
     return result.result || "";
@@ -370,6 +389,41 @@ export class FlutterDriver {
   // ================================================================
   // Private helpers
   // ================================================================
+
+  /**
+   * Verify the stored isolate is still alive and has Flutter extensions.
+   * If the isolate has been collected (e.g. after hot restart), re-discover
+   * the Flutter isolate and update our stored reference.
+   *
+   * Returns the (possibly refreshed) isolate ID.
+   */
+  private async ensureValidIsolate(): Promise<string> {
+    try {
+      const isolate = await this.client!.getIsolate(this.isolateId!);
+
+      // Check the response isn't a Sentinel (DDS returns these for collected isolates)
+      if (
+        (isolate as Record<string, unknown>)["type"] === "Sentinel" ||
+        !isolate.extensionRPCs?.some(ext => ext.startsWith("ext.flutter."))
+      ) {
+        // Isolate gone or lost extensions — re-discover
+        const { isolateId } = await this.findFlutterIsolate();
+        this.isolateId = isolateId;
+        if (this.connection) {
+          this.connection.isolateId = isolateId;
+        }
+      }
+    } catch {
+      // getIsolate failed — isolate probably gone, try re-discovery
+      const { isolateId } = await this.findFlutterIsolate();
+      this.isolateId = isolateId;
+      if (this.connection) {
+        this.connection.isolateId = isolateId;
+      }
+    }
+
+    return this.isolateId!;
+  }
 
   /**
    * Scan ADB logcat for the Dart VM service URL.
@@ -397,9 +451,64 @@ export class FlutterDriver {
       return broaderMatch[2];
     }
 
+    // Fallback: Probe existing ADB port forwards for a live DDS/VM service
+    const probed = await this.probePortForwards(deviceId);
+    if (probed) {
+      return probed;
+    }
+
     throw new Error(
-      "Could not find Dart VM service URL. Make sure a Flutter app is running in debug or profile mode on the device.",
+      "Could not find Dart VM service URL. Make sure a Flutter app is running in debug or profile mode on the device. " +
+      "If the app has been running for a while, the logcat URL may have rotated out — " +
+      "pass the VM service URL directly from 'flutter run' output.",
     );
+  }
+
+  /**
+   * Probe existing ADB port forwards for a live Dart VM/DDS service.
+   * Useful when logcat has rotated and the original URL is lost.
+   */
+  private async probePortForwards(deviceId: string): Promise<string | null> {
+    const result = await this.adb.execute(["forward", "--list"], deviceId);
+    if (result.exitCode !== 0) return null;
+
+    // Parse forward list: "serial tcp:HOST tcp:DEVICE"
+    const ports: number[] = [];
+    for (const line of result.stdout.split("\n")) {
+      const match = line.match(/tcp:(\d+)\s+tcp:\d+/);
+      if (match) ports.push(parseInt(match[1], 10));
+    }
+
+    // Also check common DDS port range on localhost
+    // DDS typically runs on ports 50000-60000
+    const http = await import("http");
+
+    for (const port of ports) {
+      try {
+        const isDartService = await new Promise<boolean>((resolve) => {
+          const req = http.get(
+            `http://127.0.0.1:${port}/`,
+            { timeout: 1500 },
+            (res) => {
+              // 403 = Dart VM service requiring auth token
+              // 200 = Possibly DevTools or other service
+              resolve(res.statusCode === 403);
+              res.resume();
+            },
+          );
+          req.on("error", () => resolve(false));
+          req.on("timeout", () => { req.destroy(); resolve(false); });
+        });
+
+        if (isDartService) {
+          return `http://127.0.0.1:${port}/`;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
   }
 
   /**
