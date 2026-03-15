@@ -1,7 +1,7 @@
 {
   "name": "mobile-device-mcp",
   "version": "0.1.0",
-  "description": "MCP server for AI-powered mobile device control and visual inspection",
+  "description": "MCP server that gives AI coding assistants (Claude, Cursor, Windsurf) the ability to see and interact with Android mobile devices via ADB — AI-powered visual inspection, element finding, and device automation",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -10,8 +10,18 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saranshbamania/mobile-device-mcp.git"
+  },
+  "homepage": "https://github.com/saranshbamania/mobile-device-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/saranshbamania/mobile-device-mcp/issues"
+  },
+  "author": "Saransh Bamania",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/generative-ai": "^0.24.1",
@@ -35,13 +45,25 @@
   ],
   "keywords": [
     "mcp",
+    "model-context-protocol",
     "mobile",
     "android",
     "adb",
     "flutter",
     "ai",
     "screenshot",
-    "automation"
+    "automation",
+    "testing",
+    "device",
+    "visual",
+    "claude",
+    "gemini",
+    "cursor",
+    "windsurf",
+    "mobile-testing",
+    "device-control",
+    "screen-analysis",
+    "ui-automation"
   ],
   "license": "MIT"
 }

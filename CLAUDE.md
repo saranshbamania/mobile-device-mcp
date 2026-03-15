@@ -8,13 +8,14 @@ A commercial MCP server product (`mobile-device-mcp`) that gives AI coding assis
 
 **This is a product being built for sale, not a hobby project.** All technical decisions should be justified through a commercial lens.
 
-## Current State (as of 2026-03-15)
+## Current State (as of 2026-03-16)
 
 ### Completed
 - **Phase 1: Android ADB Device Control** — 18 MCP tools, fully tested on Pixel 8 (Android 16, SDK 36), 13/13 tests passed
 - **Phase 2: AI Visual Analysis Layer** — 8 AI-powered MCP tools, multi-provider support (Anthropic Claude + Google Gemini), all 9/9 tests passed on real device
 - **Performance Optimization** — 3-tier element search (local → cached AI → fresh AI), TTL-based caching, parallel capture, alias mapping. Result: smart_tap 37x faster (7.6s → 205ms), find_element 7000x faster (7.1s → 1ms)
 - **GitHub repo**: https://github.com/saranshbamania/mobile-device-mcp
+- **Screenshot Compression Pipeline** — Pure-JS JPEG encoding + bilinear resize (pngjs + jpeg-js). AI tools auto-compress to JPEG q=80, 720w. Result: 251KB→88KB (65% reduction), zero AI quality loss. All 32 tests pass (22 Phase 1 + 10 Phase 2).
 - **Live tested** with Google Gemini 2.5 Flash on Pixel 8
 
 ### Not Yet Done
@@ -22,7 +23,6 @@ A commercial MCP server product (`mobile-device-mcp`) that gives AI coding assis
 - **Phase 4: iOS Support** — Simulators first (xcrun simctl), physical devices later (idevice/pymobiledevice3). Apple frequently breaks device protocols — high maintenance.
 - **Phase 5: Monetization** — License keys (Keygen.sh), usage analytics, free/paid tiers.
 - **npm publish** — Not yet published. Run `npx mobile-device-mcp` should be the zero-config experience.
-- **Screenshot compression** — Currently raw PNG. Need JPEG compression, thumbnail mode, and configurable quality to reduce token costs.
 
 ## Architecture Decisions
 
@@ -37,6 +37,7 @@ A commercial MCP server product (`mobile-device-mcp`) that gives AI coding assis
 | State management | Stateless tools | Each MCP call independent. No session to manage = no session to break |
 | Driver architecture | Modular (DeviceDriver interface) | Platform drivers (Android, iOS, Flutter) are swappable without changing tools |
 | Element search | 3-tier: local text → cached AI → fresh AI | Local search is free and instant (<1ms), AI only called for ambiguous queries |
+| Screenshot compression | JPEG q=80, 720w via pure JS | 65% size reduction, zero native deps for npx compat, AI quality unaffected |
 
 ## Performance Architecture
 
@@ -73,6 +74,8 @@ Cache invalidation after tap/type: only clears screenshot, keeps UI tree (button
 - `@anthropic-ai/sdk` v0.39.0 — Claude API (AI vision)
 - `@google/generative-ai` v0.24.1 — Gemini API (AI vision)
 - `zod` v3.25 — Tool input schema validation
+- `pngjs` — Pure-JS PNG decoding (for compression pipeline)
+- `jpeg-js` — Pure-JS JPEG encoding (for compression pipeline)
 - ADB (Android Debug Bridge) for device communication
 
 ## Development Commands
@@ -128,7 +131,7 @@ src/
 │   └── element-search.ts  # Local element search: text/alias/number matching, no AI needed
 └── utils/
     ├── discovery.ts       # Auto-find ADB, auto-detect device
-    └── image.ts           # PNG parser, base64 helpers
+    └── image.ts           # PNG parser, base64 helpers, JPEG compression pipeline (resize + encode)
 ```
 
 ## Key Patterns
@@ -140,6 +143,7 @@ src/
 - AI tools gracefully degrade: return helpful error when no API key
 - `getDriver()` / `getAnalyzer()` lazy factory pattern for dependency injection
 - Local element search tried before AI for `findElement`, `smartTap`, `smartType`
+- Screenshot compression auto-applied for AI tools (JPEG q=80, 720w). Raw PNG available via take_screenshot tool params.
 
 ## Target Customers
 
