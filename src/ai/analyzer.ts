@@ -14,6 +14,7 @@ import type {
   AnalyzedElement,
   AIConfig,
   DeviceDriver,
+  ScreenshotOptions,
   ScreenshotResult,
   UIElement,
 } from "../types.js";
@@ -50,14 +51,18 @@ async function analyzeWithTwoImages(
   userPrompt: string,
   beforeBase64: string,
   afterBase64: string,
+  beforeMimeType: string = "image/png",
+  afterMimeType: string = "image/png",
 ): Promise<string> {
   if (provider === "google") {
     return analyzeWithTwoImagesGemini(
       apiKey, model, systemPrompt, userPrompt, beforeBase64, afterBase64,
+      beforeMimeType, afterMimeType,
     );
   }
   return analyzeWithTwoImagesAnthropic(
     apiKey, model, maxTokens, systemPrompt, userPrompt, beforeBase64, afterBase64,
+    beforeMimeType, afterMimeType,
   );
 }
 
@@ -72,6 +77,8 @@ async function analyzeWithTwoImagesAnthropic(
   userPrompt: string,
   beforeBase64: string,
   afterBase64: string,
+  beforeMimeType: string = "image/png",
+  afterMimeType: string = "image/png",
 ): Promise<string> {
   const anthropic = new Anthropic({ apiKey });
   const response = await anthropic.messages.create({
@@ -86,7 +93,7 @@ async function analyzeWithTwoImagesAnthropic(
             type: "image",
             source: {
               type: "base64",
-              media_type: "image/png",
+              media_type: beforeMimeType as "image/png" | "image/jpeg" | "image/gif" | "image/webp",
               data: beforeBase64,
             },
           },
@@ -95,7 +102,7 @@ async function analyzeWithTwoImagesAnthropic(
             type: "image",
             source: {
               type: "base64",
-              media_type: "image/png",
+              media_type: afterMimeType as "image/png" | "image/jpeg" | "image/gif" | "image/webp",
               data: afterBase64,
             },
           },
@@ -123,6 +130,8 @@ async function analyzeWithTwoImagesGemini(
   userPrompt: string,
   beforeBase64: string,
   afterBase64: string,
+  beforeMimeType: string = "image/png",
+  afterMimeType: string = "image/png",
 ): Promise<string> {
   const genAI = new GoogleGenerativeAI(apiKey);
   const geminiModel = genAI.getGenerativeModel({ model });
@@ -132,9 +141,9 @@ async function analyzeWithTwoImagesGemini(
       {
         role: "user",
         parts: [
-          { inlineData: { mimeType: "image/png", data: beforeBase64 } },
+          { inlineData: { mimeType: beforeMimeType, data: beforeBase64 } },
           { text: "This is the BEFORE screenshot." },
-          { inlineData: { mimeType: "image/png", data: afterBase64 } },
+          { inlineData: { mimeType: afterMimeType, data: afterBase64 } },
           { text: "This is the AFTER screenshot.\n\n" + userPrompt },
         ],
       },
@@ -192,6 +201,9 @@ export class ScreenAnalyzer {
   } = {};
   private cacheTTL: number = 3000; // 3 seconds
 
+  /** Screenshot options used for AI analysis (compressed for performance). */
+  private screenshotOptions: ScreenshotOptions;
+
   constructor(
     private client: AIClient,
     private driver: DeviceDriver,
@@ -203,7 +215,15 @@ export class ScreenAnalyzer {
       model: string;
       maxTokens: number;
     },
-  ) {}
+    screenshotOptions?: ScreenshotOptions,
+  ) {
+    // Default: JPEG at quality 80, resize to 720px for AI — saves tokens
+    this.screenshotOptions = screenshotOptions ?? {
+      format: "jpeg",
+      quality: 80,
+      maxWidth: 720,
+    };
+  }
 
   // ----------------------------------------------------------
   // Public API
@@ -226,6 +246,7 @@ export class ScreenAnalyzer {
         systemPrompt: PROMPTS.ANALYZE_SCREEN,
         userPrompt,
         screenshot: ctx.screenshot?.base64,
+        screenshotMimeType: ctx.screenshot ? `image/${ctx.screenshot.format}` : undefined,
       });
     } catch (error) {
       throw new Error(
@@ -269,6 +290,7 @@ export class ScreenAnalyzer {
         systemPrompt: PROMPTS.FIND_ELEMENT,
         userPrompt,
         screenshot: ctx.screenshot?.base64,
+        screenshotMimeType: ctx.screenshot ? `image/${ctx.screenshot.format}` : undefined,
       });
     } catch (error) {
       throw new Error(
@@ -309,6 +331,7 @@ export class ScreenAnalyzer {
         systemPrompt: PROMPTS.SUGGEST_ACTIONS,
         userPrompt,
         screenshot: ctx.screenshot?.base64,
+        screenshotMimeType: ctx.screenshot ? `image/${ctx.screenshot.format}` : undefined,
       });
     } catch (error) {
       throw new Error(
@@ -329,8 +352,13 @@ export class ScreenAnalyzer {
       this.assertClientAvailable();
 
       // Always take a fresh screenshot for the "after" state.
-      const afterScreenshot = await this.driver.takeScreenshot(deviceId);
+      const afterScreenshot = await this.driver.takeScreenshot(deviceId, this.screenshotOptions);
       const userPrompt = buildVisualDiffPrompt();
+
+      // Before image might be PNG (from take_screenshot tool) or JPEG (from cached).
+      // Detect from base64 header: JPEG starts with /9j/, PNG starts with iVBOR.
+      const beforeMimeType = beforeBase64.startsWith("/9j/") ? "image/jpeg" : "image/png";
+      const afterMimeType = `image/${afterScreenshot.format}`;
 
       const raw = await analyzeWithTwoImages(
         this.config.provider,
@@ -341,6 +369,8 @@ export class ScreenAnalyzer {
         userPrompt,
         beforeBase64,
         afterScreenshot.base64,
+        beforeMimeType,
+        afterMimeType,
       );
 
       return parseJSONResponse<VisualDiff>(raw);
@@ -359,13 +389,14 @@ export class ScreenAnalyzer {
       this.assertClientAvailable();
 
       // Always need a screenshot for OCR — ignore UITree config.
-      const screenshot = await this.driver.takeScreenshot(deviceId);
+      const screenshot = await this.driver.takeScreenshot(deviceId, this.screenshotOptions);
       const userPrompt = buildExtractTextPrompt();
 
       const result = await this.client.analyzeJSON<{ texts: string[] }>({
         systemPrompt: PROMPTS.EXTRACT_TEXT,
         userPrompt,
         screenshot: screenshot.base64,
+        screenshotMimeType: `image/${screenshot.format}`,
       });
 
       return result.texts;
@@ -395,6 +426,7 @@ export class ScreenAnalyzer {
         systemPrompt: PROMPTS.VERIFY_SCREEN,
         userPrompt,
         screenshot: ctx.screenshot?.base64,
+        screenshotMimeType: ctx.screenshot ? `image/${ctx.screenshot.format}` : undefined,
       });
     } catch (error) {
       throw new Error(
@@ -558,7 +590,7 @@ export class ScreenAnalyzer {
 
     if (this.config.analyzeWithScreenshot && !cachedScreenshot) {
       promises.push(
-        this.driver.takeScreenshot(deviceId).then((s) => {
+        this.driver.takeScreenshot(deviceId, this.screenshotOptions).then((s) => {
           ctx.screenshot = s;
           this.cache.screenshot = { data: s, timestamp: now };
         }),

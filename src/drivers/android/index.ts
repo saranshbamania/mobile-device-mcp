@@ -17,6 +17,7 @@ import type {
   UIElement,
   UIElementOptions,
 } from "../../types.js";
+import { processScreenshot } from "../../utils/image.js";
 
 // ------------------------------------------------------------------
 // Helpers
@@ -36,36 +37,6 @@ function escapeForAdbInput(text: string): string {
     .replace(/ /g, "%s")
     .replace(/(["`$!&|;()<>{}[\]*?#~^])/g, "\\$1")
     .replace(/'/g, "\\'");
-}
-
-/**
- * Parse the PNG IHDR chunk to extract width and height.
- * PNG layout:
- *   bytes  0- 7: signature (89 50 4E 47 0D 0A 1A 0A)
- *   bytes  8-11: IHDR length (always 13)
- *   bytes 12-15: "IHDR"
- *   bytes 16-19: width  (big-endian uint32)
- *   bytes 20-23: height (big-endian uint32)
- */
-function parsePngDimensions(buf: Buffer): { width: number; height: number } {
-  if (buf.length < 24) {
-    throw new Error("Buffer too small to be a valid PNG image");
-  }
-
-  // Validate PNG signature
-  const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  if (!buf.subarray(0, 8).equals(PNG_SIGNATURE)) {
-    throw new Error("Buffer does not contain a valid PNG signature");
-  }
-
-  const width = buf.readUInt32BE(16);
-  const height = buf.readUInt32BE(20);
-
-  if (width === 0 || height === 0) {
-    throw new Error("Invalid PNG dimensions: width or height is 0");
-  }
-
-  return { width, height };
 }
 
 /**
@@ -267,17 +238,16 @@ export class AndroidDriver implements DeviceDriver {
       throw new Error(`Screenshot returned empty buffer for device ${deviceId}`);
     }
 
-    const { width, height } = parsePngDimensions(pngBuffer);
-
-    const base64 = pngBuffer.toString("base64");
+    // Process: resize and/or convert to JPEG based on options
+    const processed = processScreenshot(pngBuffer, options);
 
     return {
-      base64,
-      width,
-      height,
-      format: options?.format ?? "png",
+      base64: processed.base64,
+      width: processed.width,
+      height: processed.height,
+      format: processed.format,
       timestamp,
-      sizeBytes: pngBuffer.length,
+      sizeBytes: processed.sizeBytes,
     };
   }
 

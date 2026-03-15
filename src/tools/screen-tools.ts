@@ -18,15 +18,34 @@ export function registerScreenTools(
     {
       title: "Take Screenshot",
       description:
-        "Capture a screenshot of the device screen. Returns the image as a PNG along with metadata (width, height, file size). Use this to visually inspect what is currently displayed on the device.",
+        "Capture a screenshot of the device screen. Returns the image with metadata (width, height, file size). Supports PNG (lossless, larger) and JPEG (compressed, smaller). Use format='jpeg' with quality and max_width to reduce image size for AI analysis.",
       inputSchema: z.object({
         device_id: z.string().describe("Device serial ID"),
+        format: z
+          .enum(["png", "jpeg"])
+          .optional()
+          .describe("Image format: 'png' (lossless, default) or 'jpeg' (compressed)"),
+        quality: z
+          .number()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe("JPEG quality 1-100 (default: 80). Only used when format is 'jpeg'"),
+        max_width: z
+          .number()
+          .min(100)
+          .optional()
+          .describe("Resize to this max width in pixels, maintaining aspect ratio. Reduces file size significantly"),
       }),
     },
-    async ({ device_id }) => {
+    async ({ device_id, format, quality, max_width }) => {
       try {
         const driver = getDriver();
-        const result = await driver.takeScreenshot(device_id);
+        const result = await driver.takeScreenshot(device_id, {
+          format,
+          quality,
+          maxWidth: max_width,
+        });
         const sizeKB = (result.sizeBytes / 1024).toFixed(1);
         return {
           content: [
@@ -37,7 +56,7 @@ export function registerScreenTools(
             {
               type: "image" as const,
               data: result.base64,
-              mimeType: `image/${result.format}` as const,
+              mimeType: `image/${result.format}` as `image/png` | `image/jpeg`,
             },
           ],
         };

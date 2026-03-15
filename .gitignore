@@ -10,3 +10,7 @@ test-local-search.ts
 test-speed.ts
 test-ai-live.ts
 test-ai-result.png
+test-device.ts
+test-ai.ts
+test-compression.ts
+test-quick.ts

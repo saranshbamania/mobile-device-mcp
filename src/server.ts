@@ -34,7 +34,11 @@ export function createServer(config: ServerConfig): {
   let analyzer: ScreenAnalyzer | null = null;
   if (config.ai && config.ai.apiKey) {
     const aiClient = new AIClient(config.ai);
-    analyzer = new ScreenAnalyzer(aiClient, driver, config.ai);
+    analyzer = new ScreenAnalyzer(aiClient, driver, config.ai, {
+      format: config.screenshotFormat,
+      quality: config.screenshotQuality,
+      maxWidth: config.screenshotMaxWidth,
+    });
   }
 
   registerAllTools(server, () => driver, () => analyzer);

@@ -257,7 +257,7 @@ export interface ServerConfig {
 
 export const DEFAULT_CONFIG: ServerConfig = {
   adbPath: "adb",
-  screenshotFormat: "png",
+  screenshotFormat: "jpeg",
   screenshotQuality: 80,
-  screenshotMaxWidth: 1080,
+  screenshotMaxWidth: 720,
 };

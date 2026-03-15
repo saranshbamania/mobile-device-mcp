@@ -1,6 +1,18 @@
 // ============================================================
 // Image processing utilities
+//
+// Provides PNG parsing, JPEG compression, and resize capabilities
+// using pure-JS libraries (no native dependencies) for zero-config
+// npm distribution.
 // ============================================================
+
+import { PNG } from "pngjs";
+import * as jpeg from "jpeg-js";
+import type { ScreenshotOptions } from "../types.js";
+
+// ------------------------------------------------------------------
+// PNG parsing (lightweight — no full decode needed)
+// ------------------------------------------------------------------
 
 /**
  * Parse width and height from a PNG buffer by reading the IHDR chunk.
@@ -71,4 +83,141 @@ export function getImageSizeBytes(base64: string): number {
   if (len > 1 && base64[len - 2] === "=") padding++;
 
   return Math.floor((len * 3) / 4) - padding;
+}
+
+// ------------------------------------------------------------------
+// Screenshot compression pipeline
+// ------------------------------------------------------------------
+
+export interface ProcessedScreenshot {
+  buffer: Buffer;
+  base64: string;
+  width: number;
+  height: number;
+  format: "png" | "jpeg";
+  sizeBytes: number;
+}
+
+/**
+ * Process a raw PNG screenshot buffer: optionally resize and convert to JPEG.
+ *
+ * Pipeline: PNG buffer → decode to RGBA → resize (if maxWidth set) → encode
+ *
+ * When format is "png" and no resize is needed, returns the original buffer
+ * untouched (zero-cost passthrough).
+ */
+export function processScreenshot(
+  pngBuffer: Buffer,
+  options?: ScreenshotOptions,
+): ProcessedScreenshot {
+  const format = options?.format ?? "png";
+  const quality = options?.quality ?? 80;
+  const maxWidth = options?.maxWidth;
+
+  const { width: origWidth, height: origHeight } = parsePngDimensions(pngBuffer);
+
+  // Fast path: no processing needed
+  const needsResize = maxWidth !== undefined && maxWidth > 0 && origWidth > maxWidth;
+  if (format === "png" && !needsResize) {
+    return {
+      buffer: pngBuffer,
+      base64: pngBuffer.toString("base64"),
+      width: origWidth,
+      height: origHeight,
+      format: "png",
+      sizeBytes: pngBuffer.length,
+    };
+  }
+
+  // Decode PNG to raw RGBA pixels
+  const decoded = PNG.sync.read(pngBuffer);
+  let { width, height, data } = decoded;
+
+  // Resize if needed (bilinear interpolation)
+  if (needsResize) {
+    const scale = maxWidth! / width;
+    const newWidth = maxWidth!;
+    const newHeight = Math.round(height * scale);
+    data = resizeBilinear(data, width, height, newWidth, newHeight);
+    width = newWidth;
+    height = newHeight;
+  }
+
+  // Encode to target format
+  let outputBuffer: Buffer;
+  if (format === "jpeg") {
+    const rawImageData = {
+      data,
+      width,
+      height,
+    };
+    const encoded = jpeg.encode(rawImageData, quality);
+    outputBuffer = encoded.data;
+  } else {
+    // Re-encode as PNG (only reached if resize happened)
+    const png = new PNG({ width, height });
+    png.data = data;
+    outputBuffer = PNG.sync.write(png);
+  }
+
+  return {
+    buffer: outputBuffer,
+    base64: outputBuffer.toString("base64"),
+    width,
+    height,
+    format,
+    sizeBytes: outputBuffer.length,
+  };
+}
+
+// ------------------------------------------------------------------
+// Bilinear interpolation resize
+// ------------------------------------------------------------------
+
+/**
+ * Resize RGBA pixel data using bilinear interpolation.
+ * Produces smooth results without jagged edges — important for
+ * AI vision models to read text accurately.
+ */
+function resizeBilinear(
+  src: Buffer,
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number,
+): Buffer {
+  const dst = Buffer.alloc(dstW * dstH * 4);
+  const xRatio = (srcW - 1) / (dstW - 1);
+  const yRatio = (srcH - 1) / (dstH - 1);
+
+  for (let y = 0; y < dstH; y++) {
+    const srcY = y * yRatio;
+    const yFloor = Math.floor(srcY);
+    const yCeil = Math.min(yFloor + 1, srcH - 1);
+    const yFrac = srcY - yFloor;
+
+    for (let x = 0; x < dstW; x++) {
+      const srcX = x * xRatio;
+      const xFloor = Math.floor(srcX);
+      const xCeil = Math.min(xFloor + 1, srcW - 1);
+      const xFrac = srcX - xFloor;
+
+      // Four neighboring pixels
+      const tlIdx = (yFloor * srcW + xFloor) * 4;
+      const trIdx = (yFloor * srcW + xCeil) * 4;
+      const blIdx = (yCeil * srcW + xFloor) * 4;
+      const brIdx = (yCeil * srcW + xCeil) * 4;
+
+      const dstIdx = (y * dstW + x) * 4;
+
+      // Interpolate each channel (R, G, B, A)
+      for (let c = 0; c < 4; c++) {
+        const top = src[tlIdx + c] * (1 - xFrac) + src[trIdx + c] * xFrac;
+        const bottom = src[blIdx + c] * (1 - xFrac) + src[brIdx + c] * xFrac;
+        dst[dstIdx + c] = Math.round(top * (1 - yFrac) + bottom * yFrac);
+      }
+    }
+  }
+
+  return dst;
 }
