@@ -26,8 +26,11 @@ export interface AnalyzeOptions {
   maxTokens?: number;
 }
 
-/** Delay (ms) before a manual retry for retryable errors. */
+/** Default delay (ms) before a manual retry for retryable errors. */
 const RETRY_DELAY_MS = 2_000;
+
+/** Maximum number of retries for rate-limit errors. */
+const MAX_RETRIES = 3;
 
 /** Per-request timeout in milliseconds. */
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -218,7 +221,8 @@ export class AIClient {
   }
 
   /**
-   * Call Gemini generateContent with a single manual retry for 429 / 503.
+   * Call Gemini generateContent with retries for 429 / 503 errors.
+   * Parses the RetryInfo delay from Google API error messages.
    */
   private async createWithRetryGemini(
     systemPrompt: string,
@@ -230,17 +234,23 @@ export class AIClient {
       contents: [{ role: "user" as const, parts }],
     };
 
-    try {
-      const result = await model.generateContent(request);
-      return result.response.text();
-    } catch (error: unknown) {
-      if (this.isRetryableGemini(error)) {
-        await this.delay(RETRY_DELAY_MS);
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
         const result = await model.generateContent(request);
         return result.response.text();
+      } catch (error: unknown) {
+        lastError = error;
+        if (attempt < MAX_RETRIES && this.isRetryableGemini(error)) {
+          const retryDelay = this.extractRetryDelay(error) || RETRY_DELAY_MS * (attempt + 1);
+          await this.delay(retryDelay);
+          continue;
+        }
+        throw this.wrapError(error);
       }
-      throw this.wrapError(error);
     }
+
+    throw this.wrapError(lastError);
   }
 
   /**
@@ -253,6 +263,29 @@ export class AIClient {
       return message.includes("429") || message.includes("503");
     }
     return false;
+  }
+
+  /**
+   * Extract the retry delay (in ms) from a Google API error message.
+   * Looks for patterns like 'retryDelay":"23s"' or 'Please retry in 23.2s'.
+   */
+  private extractRetryDelay(error: unknown): number | null {
+    if (!(error instanceof Error)) return null;
+    const msg = error.message || "";
+
+    // Try "Please retry in Xs" pattern
+    const retryInMatch = msg.match(/Please retry in (\d+(?:\.\d+)?)s/);
+    if (retryInMatch) {
+      return Math.ceil(parseFloat(retryInMatch[1]) * 1000) + 1000; // add 1s buffer
+    }
+
+    // Try "retryDelay":"Xs" pattern
+    const retryDelayMatch = msg.match(/"retryDelay"\s*:\s*"(\d+)s"/);
+    if (retryDelayMatch) {
+      return parseInt(retryDelayMatch[1], 10) * 1000 + 1000;
+    }
+
+    return null;
   }
 
   // ------------------------------------------------------------------

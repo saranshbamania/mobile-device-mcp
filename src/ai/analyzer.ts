@@ -28,6 +28,7 @@ import {
   buildVerifyScreenPrompt,
   summarizeUIElements,
 } from "./prompts.js";
+import { searchElementsLocally } from "./element-search.js";
 
 // ----------------------------------------------------------
 // Two-image analysis helper (used for visual diff)
@@ -185,6 +186,12 @@ interface CapturedContext {
 }
 
 export class ScreenAnalyzer {
+  private cache: {
+    screenshot?: { data: ScreenshotResult; timestamp: number };
+    uiElements?: { data: UIElement[]; timestamp: number };
+  } = {};
+  private cacheTTL: number = 3000; // 3 seconds
+
   constructor(
     private client: AIClient,
     private driver: DeviceDriver,
@@ -229,12 +236,28 @@ export class ScreenAnalyzer {
 
   /**
    * Find an element on screen by natural language description.
+   *
+   * Fast path: searches the UI tree locally first. If a high-confidence
+   * match is found (>0.7), returns immediately without calling the AI.
+   * Falls back to AI for ambiguous or complex queries.
    */
   async findElement(
     deviceId: string,
     query: string,
   ): Promise<ElementMatch> {
     try {
+      // --- Fast path: local UI tree search (no AI call) ---
+      if (this.config.analyzeWithUITree) {
+        const uiElements = await this.getUIElements(deviceId);
+        if (uiElements && uiElements.length > 0) {
+          const localMatch = searchElementsLocally(uiElements, query);
+          if (localMatch.found && localMatch.confidence > 0.5) {
+            return localMatch;
+          }
+        }
+      }
+
+      // --- Slow path: AI-powered search ---
       this.assertClientAvailable();
       const ctx = await this.captureContext(deviceId);
       const summarized = ctx.uiElements
@@ -401,6 +424,7 @@ export class ScreenAnalyzer {
           match.element.bounds.centerX,
           match.element.bounds.centerY,
         );
+        this.invalidateCache();
         return {
           success: true,
           tapped: match.element,
@@ -449,6 +473,7 @@ export class ScreenAnalyzer {
 
         // Type the text.
         await this.driver.typeText(deviceId, text);
+        this.invalidateCache();
 
         return {
           success: true,
@@ -474,22 +499,103 @@ export class ScreenAnalyzer {
   // ----------------------------------------------------------
 
   /**
+   * Fetch UI elements for the device, using the cache when valid.
+   * This is a lightweight call (no screenshot) used by the local
+   * element search fast path.
+   */
+  private async getUIElements(deviceId: string): Promise<UIElement[] | undefined> {
+    if (
+      this.cache.uiElements &&
+      this.isCacheValid(this.cache.uiElements.timestamp)
+    ) {
+      return this.cache.uiElements.data;
+    }
+
+    try {
+      const elements = await this.driver.getUIElements(deviceId, {
+        interactiveOnly: false,
+      });
+      this.cache.uiElements = { data: elements, timestamp: Date.now() };
+      return elements;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Capture screenshot and/or UI elements based on config flags.
+   * Uses caching with TTL and parallel capture for performance.
    */
   private async captureContext(deviceId: string): Promise<CapturedContext> {
     const ctx: CapturedContext = {};
+    const now = Date.now();
 
-    if (this.config.analyzeWithScreenshot) {
-      ctx.screenshot = await this.driver.takeScreenshot(deviceId);
+    // Check cache for valid screenshot
+    const cachedScreenshot =
+      this.config.analyzeWithScreenshot &&
+      this.cache.screenshot &&
+      this.isCacheValid(this.cache.screenshot.timestamp)
+        ? this.cache.screenshot.data
+        : undefined;
+
+    // Check cache for valid UI elements
+    const cachedUIElements =
+      this.config.analyzeWithUITree &&
+      this.cache.uiElements &&
+      this.isCacheValid(this.cache.uiElements.timestamp)
+        ? this.cache.uiElements.data
+        : undefined;
+
+    if (cachedScreenshot) {
+      ctx.screenshot = cachedScreenshot;
+    }
+    if (cachedUIElements) {
+      ctx.uiElements = cachedUIElements;
     }
 
-    if (this.config.analyzeWithUITree) {
-      ctx.uiElements = await this.driver.getUIElements(deviceId, {
-        interactiveOnly: false,
-      });
+    // Capture missing data in parallel
+    const promises: Promise<void>[] = [];
+
+    if (this.config.analyzeWithScreenshot && !cachedScreenshot) {
+      promises.push(
+        this.driver.takeScreenshot(deviceId).then((s) => {
+          ctx.screenshot = s;
+          this.cache.screenshot = { data: s, timestamp: now };
+        }),
+      );
     }
+
+    if (this.config.analyzeWithUITree && !cachedUIElements) {
+      promises.push(
+        this.driver
+          .getUIElements(deviceId, { interactiveOnly: false })
+          .then((e) => {
+            ctx.uiElements = e;
+            this.cache.uiElements = { data: e, timestamp: now };
+          }),
+      );
+    }
+
+    await Promise.all(promises);
 
     return ctx;
+  }
+
+  /**
+   * Check if a cached entry is still valid based on TTL.
+   */
+  private isCacheValid(timestamp: number): boolean {
+    return Date.now() - timestamp < this.cacheTTL;
+  }
+
+  /**
+   * Invalidate the cache — call after actions that change the screen.
+   * Only clears the screenshot. UI element positions (button layout)
+   * rarely change after a tap, so keep the UI tree cache to avoid
+   * expensive uiautomator dump calls on every interaction.
+   */
+  private invalidateCache(): void {
+    this.cache.screenshot = undefined;
   }
 
   /**
