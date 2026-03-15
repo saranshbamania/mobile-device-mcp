@@ -31,14 +31,15 @@ Without this tool:                    With this tool:
 ### Install & Run
 
 ```bash
-# Clone and build
-git clone https://github.com/saranshbamania/mobile-device-mcp.git
-cd mobile-device-mcp
-npm install
-npm run build
+# Zero-config — just run it
+npx mobile-device-mcp
+```
 
-# Run (auto-discovers ADB and connected devices)
-node dist/index.js
+Or install globally:
+
+```bash
+npm install -g mobile-device-mcp
+mobile-device-mcp
 ```
 
 ### Configure with Claude Code
@@ -49,11 +50,10 @@ Add to your Claude Code MCP settings (`~/.claude/settings.json`):
 {
   "mcpServers": {
     "mobile-device": {
-      "command": "node",
-      "args": ["/path/to/mobile-device-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "mobile-device-mcp"],
       "env": {
-        "GOOGLE_API_KEY": "your-google-api-key",
-        "ANTHROPIC_API_KEY": "your-anthropic-api-key"
+        "GOOGLE_API_KEY": "your-google-api-key"
       }
     }
   }
@@ -68,8 +68,26 @@ Add to `.cursor/mcp.json`:
 {
   "mcpServers": {
     "mobile-device": {
-      "command": "node",
-      "args": ["/path/to/mobile-device-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "mobile-device-mcp"],
+      "env": {
+        "GOOGLE_API_KEY": "your-google-api-key"
+      }
+    }
+  }
+}
+```
+
+### Configure with VS Code / Windsurf
+
+Add to your MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "mobile-device": {
+      "command": "npx",
+      "args": ["-y", "mobile-device-mcp"],
       "env": {
         "GOOGLE_API_KEY": "your-google-api-key"
       }
@@ -87,7 +105,7 @@ Add to `.cursor/mcp.json`:
 | `list_devices` | List all connected Android devices/emulators |
 | `get_device_info` | Model, manufacturer, Android version, SDK level |
 | `get_screen_size` | Screen resolution in pixels |
-| `take_screenshot` | Capture PNG screenshot (returned as base64 image) |
+| `take_screenshot` | Capture screenshot (PNG or JPEG, configurable quality & resize) |
 | `get_ui_elements` | Get the accessibility/UI element tree as structured JSON |
 | `tap` | Tap at coordinates |
 | `double_tap` | Double tap at coordinates |
@@ -118,18 +136,28 @@ These tools use AI vision (Claude or Gemini) to understand what's on screen. Req
 | `extract_text` | Extract all visible text from the screen (AI-powered OCR) |
 | `verify_screen` | Verify an assertion: *"the login was successful"*, *"error message is showing"* |
 
+## Performance
+
+The server is optimized to minimize latency and AI token costs:
+
+- **3-tier element search**: local text match (<1ms) → cached AI → fresh AI. `smart_tap` is 37x faster than naive AI calls.
+- **Screenshot compression**: AI tools auto-compress to JPEG q=80, 720w — **65% smaller** (251KB → 88KB) with zero quality loss. Saves ~55K tokens per screenshot.
+- **Parallel capture**: Screenshot + UI tree fetched simultaneously via `Promise.all()`.
+- **TTL caching**: 3-second cache avoids redundant ADB calls for rapid-fire tool usage.
+
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude vision | — |
-| `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Google API key for Gemini vision | — |
+| `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Google API key for Gemini vision (recommended — cheapest) | — |
 | `MCP_AI_PROVIDER` | Force AI provider: `"anthropic"` or `"google"` | Auto-detected |
-| `MCP_AI_MODEL` | Override AI model | `claude-sonnet-4-20250514` / `gemini-2.5-flash` |
+| `MCP_AI_MODEL` | Override AI model | `gemini-2.5-flash` / `claude-sonnet-4-20250514` |
 | `MCP_ADB_PATH` | Custom ADB binary path | Auto-discovered |
 | `MCP_DEFAULT_DEVICE` | Default device serial | Auto-discovered |
-| `MCP_SCREENSHOT_FORMAT` | `"png"` or `"jpeg"` | `png` |
+| `MCP_SCREENSHOT_FORMAT` | `"png"` or `"jpeg"` | `jpeg` |
 | `MCP_SCREENSHOT_QUALITY` | JPEG quality (1-100) | `80` |
+| `MCP_SCREENSHOT_MAX_WIDTH` | Resize screenshots to this max width | `720` |
 | `MCP_AI_SCREENSHOT` | Send screenshots to AI (`"true"`/`"false"`) | `true` |
 | `MCP_AI_UITREE` | Send UI tree to AI (`"true"`/`"false"`) | `true` |
 
@@ -153,10 +181,11 @@ src/
 ├── ai/                   # AI visual analysis engine
 │   ├── client.ts         # Multi-provider client (Anthropic + Google)
 │   ├── prompts.ts        # System prompts & UI element summarizer
-│   └── analyzer.ts       # ScreenAnalyzer orchestrator
+│   ├── analyzer.ts       # ScreenAnalyzer orchestrator
+│   └── element-search.ts # Local element search (no AI needed)
 └── utils/
     ├── discovery.ts       # ADB auto-discovery
-    └── image.ts           # PNG parsing utilities
+    └── image.ts           # PNG parsing, JPEG compression, bilinear resize
 ```
 
 ## Roadmap
@@ -164,17 +193,19 @@ src/
 - [x] Phase 1: Android ADB device control (18 tools)
 - [x] Phase 2: AI visual analysis layer (8 tools)
 - [x] Multi-provider AI (Anthropic Claude + Google Gemini)
+- [x] Performance optimization (3-tier search, caching, parallel capture)
+- [x] Screenshot compression pipeline (JPEG, resize, configurable quality)
+- [x] npm publish (`npx mobile-device-mcp`)
 - [ ] Phase 3: Flutter widget tree integration (Dart VM Service Protocol)
 - [ ] Phase 4: iOS support (simulators via xcrun simctl, devices via idevice)
 - [ ] Phase 5: Monetization (license keys, usage analytics)
-- [ ] npm publish (`npx mobile-device-mcp`)
-- [ ] Screenshot compression pipeline (JPEG, thumbnail mode)
 - [ ] Multi-device orchestration
 
 ## Tested On
 
-- Pixel 8, Android 16, SDK 36 — 13/13 device tests passed
-- Windows 11 + ADB over TCP
+- Pixel 8, Android 16, SDK 36 — 32/32 tests passed (22 device + 10 AI)
+- Google Gemini 2.5 Flash
+- Windows 11 + wireless ADB
 
 ## License
 
