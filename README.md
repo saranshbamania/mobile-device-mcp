@@ -1,6 +1,6 @@
 # mobile-device-mcp
 
-MCP server that gives AI coding assistants (Claude Code, Cursor, Windsurf) the ability to **see and interact with mobile devices**. 26 tools for screenshots, UI inspection, touch interaction, and AI-powered visual analysis.
+MCP server that gives AI coding assistants (Claude Code, Cursor, Windsurf) the ability to **see and interact with mobile devices**. 34 tools for screenshots, UI inspection, touch interaction, AI-powered visual analysis, and Flutter widget tree inspection.
 
 > AI assistants can read your code but can't see your phone. This fixes that.
 
@@ -96,7 +96,7 @@ Add to your MCP settings:
 }
 ```
 
-## Tools (26 total)
+## Tools (34 total)
 
 ### Phase 1 — Device Control (18 tools)
 
@@ -135,6 +135,21 @@ These tools use AI vision (Claude or Gemini) to understand what's on screen. Req
 | `visual_diff` | Compare current screen with a previous screenshot — what changed? |
 | `extract_text` | Extract all visible text from the screen (AI-powered OCR) |
 | `verify_screen` | Verify an assertion: *"the login was successful"*, *"error message is showing"* |
+
+### Phase 3 — Flutter Widget Tree (8 tools)
+
+These tools connect to a running Flutter app in debug/profile mode via the Dart VM Service Protocol. Maps every widget to its source code location (`file:line`).
+
+| Tool | What it does |
+|------|-------------|
+| `flutter_connect` | Discover and connect to a running Flutter app on the device |
+| `flutter_disconnect` | Disconnect from the Flutter app and clean up resources |
+| `flutter_get_widget_tree` | Get the full widget tree (summary or detailed) |
+| `flutter_get_widget_details` | Get detailed properties of a specific widget by ID |
+| `flutter_find_widget` | Search the widget tree by type, text, or description |
+| `flutter_get_source_map` | Map every widget to its source code location (file:line:column) |
+| `flutter_screenshot_widget` | Screenshot a specific widget in isolation |
+| `flutter_debug_paint` | Toggle debug paint overlay (shows widget boundaries & padding) |
 
 ## Performance
 
@@ -177,7 +192,11 @@ src/
 │   ├── interaction-tools.ts # Touch, type, keys
 │   ├── app-tools.ts      # App management
 │   ├── log-tools.ts      # Logcat
-│   └── ai-tools.ts       # AI-powered tools
+│   ├── ai-tools.ts       # AI-powered tools
+│   └── flutter-tools.ts  # Flutter widget inspection tools
+├── drivers/flutter/      # Dart VM Service driver
+│   ├── index.ts          # FlutterDriver (discovery, inspection, source mapping)
+│   └── vm-service.ts     # JSON-RPC 2.0 WebSocket client (DDS redirect handling)
 ├── ai/                   # AI visual analysis engine
 │   ├── client.ts         # Multi-provider client (Anthropic + Google)
 │   ├── prompts.ts        # System prompts & UI element summarizer
@@ -196,14 +215,15 @@ src/
 - [x] Performance optimization (3-tier search, caching, parallel capture)
 - [x] Screenshot compression pipeline (JPEG, resize, configurable quality)
 - [x] npm publish (`npx mobile-device-mcp`)
-- [ ] Phase 3: Flutter widget tree integration (Dart VM Service Protocol)
+- [x] Phase 3: Flutter widget tree integration (8 tools, Dart VM Service Protocol)
 - [ ] Phase 4: iOS support (simulators via xcrun simctl, devices via idevice)
 - [ ] Phase 5: Monetization (license keys, usage analytics)
 - [ ] Multi-device orchestration
 
 ## Tested On
 
-- Pixel 8, Android 16, SDK 36 — 32/32 tests passed (22 device + 10 AI)
+- Pixel 8, Android 16, SDK 36 — 44/44 tests passed (22 device + 10 AI + 12 Flutter)
+- Flutter 3.41.3, metroping app (debug mode)
 - Google Gemini 2.5 Flash
 - Windows 11 + wireless ADB
 

@@ -14,15 +14,15 @@ A commercial MCP server product (`mobile-device-mcp`) that gives AI coding assis
 - **Phase 1: Android ADB Device Control** — 18 MCP tools, fully tested on Pixel 8 (Android 16, SDK 36), 13/13 tests passed
 - **Phase 2: AI Visual Analysis Layer** — 8 AI-powered MCP tools, multi-provider support (Anthropic Claude + Google Gemini), all 9/9 tests passed on real device
 - **Performance Optimization** — 3-tier element search (local → cached AI → fresh AI), TTL-based caching, parallel capture, alias mapping. Result: smart_tap 37x faster (7.6s → 205ms), find_element 7000x faster (7.1s → 1ms)
-- **GitHub repo**: https://github.com/saranshbamania/mobile-device-mcp
 - **Screenshot Compression Pipeline** — Pure-JS JPEG encoding + bilinear resize (pngjs + jpeg-js). AI tools auto-compress to JPEG q=80, 720w. Result: 251KB→88KB (65% reduction), zero AI quality loss. All 32 tests pass (22 Phase 1 + 10 Phase 2).
+- **Phase 3: Flutter Widget Tree** — 8 Flutter-specific MCP tools via Dart VM Service Protocol. Connects to running debug/profile apps, inspects widget tree, maps 93 widgets to source code file:line. Handles DDS redirect. 12/12 tests passed on real device (metroping app on Pixel 8).
+- **GitHub repo**: https://github.com/saranshbamania/mobile-device-mcp
+- **npm published**: v0.1.0 — `npx mobile-device-mcp`
 - **Live tested** with Google Gemini 2.5 Flash on Pixel 8
 
 ### Not Yet Done
-- **Phase 3: Flutter Widget Tree** — Connect to Dart VM Service Protocol for Flutter-specific widget inspection. Maps UI elements directly to source code file:line. Strongest technical moat. NOTE: Only works in Debug/Profile mode (VM service stripped from Release builds).
 - **Phase 4: iOS Support** — Simulators first (xcrun simctl), physical devices later (idevice/pymobiledevice3). Apple frequently breaks device protocols — high maintenance.
 - **Phase 5: Monetization** — License keys (Keygen.sh), usage analytics, free/paid tiers.
-- **npm publish** — Not yet published. Run `npx mobile-device-mcp` should be the zero-config experience.
 
 ## Architecture Decisions
 
@@ -76,6 +76,7 @@ Cache invalidation after tap/type: only clears screenshot, keeps UI tree (button
 - `zod` v3.25 — Tool input schema validation
 - `pngjs` — Pure-JS PNG decoding (for compression pipeline)
 - `jpeg-js` — Pure-JS JPEG encoding (for compression pipeline)
+- `ws` — WebSocket client (for Dart VM Service Protocol)
 - ADB (Android Debug Bridge) for device communication
 
 ## Development Commands
@@ -123,7 +124,11 @@ src/
 │   ├── interaction-tools.ts # tap, double_tap, long_press, swipe, type_text, press_key
 │   ├── app-tools.ts       # list_apps, get_current_app, launch_app, stop_app, install_app, uninstall_app
 │   ├── log-tools.ts       # get_logs
-│   └── ai-tools.ts        # analyze_screen, find_element, smart_tap, smart_type, suggest_actions, visual_diff, extract_text, verify_screen
+│   ├── ai-tools.ts        # analyze_screen, find_element, smart_tap, smart_type, suggest_actions, visual_diff, extract_text, verify_screen
+│   └── flutter-tools.ts   # flutter_connect, flutter_disconnect, flutter_get_widget_tree, flutter_get_widget_details, flutter_find_widget, flutter_get_source_map, flutter_screenshot_widget, flutter_debug_paint
+├── drivers/flutter/
+│   ├── index.ts           # FlutterDriver: VM service discovery, widget inspection, source mapping
+│   └── vm-service.ts      # VmServiceClient: JSON-RPC 2.0 over WebSocket, DDS redirect handling
 ├── ai/
 │   ├── client.ts          # Multi-provider AI client (Anthropic + Google Gemini, retry with backoff)
 │   ├── prompts.ts         # System prompts, user prompt builders, UI summarizer
@@ -141,9 +146,10 @@ src/
 - All user-facing output to stderr (stdout reserved for MCP JSON-RPC)
 - All local imports use `.js` extension (ESM requirement)
 - AI tools gracefully degrade: return helpful error when no API key
-- `getDriver()` / `getAnalyzer()` lazy factory pattern for dependency injection
+- `getDriver()` / `getAnalyzer()` / `getFlutter()` lazy factory pattern for dependency injection
 - Local element search tried before AI for `findElement`, `smartTap`, `smartType`
 - Screenshot compression auto-applied for AI tools (JPEG q=80, 720w). Raw PNG available via take_screenshot tool params.
+- Flutter VM service: DDS redirect-following in WebSocket connect, handles both object and JSON string responses
 
 ## Target Customers
 
@@ -156,10 +162,10 @@ src/
 - `mobile-next/mobile-mcp` (3.9k stars) — most mature, but no AI visual analysis, no Flutter
 - `appium/appium-mcp` (242 stars) — comprehensive but requires Appium server, complex setup
 - `leancodepl/marionette_mcp` (190 stars) — Flutter-specific, no ADB device control
-- **Our differentiation**: Unified device control + AI vision + multi-provider + zero-friction setup + performance optimization (local element search)
+- **Our differentiation**: Unified device control + AI vision + Flutter widget tree + multi-provider + zero-friction setup + performance optimization (local element search)
 
 ## Resuming Work
 
 When continuing on a new machine, tell Claude Code:
 
-> Pull https://github.com/saranshbamania/mobile-device-mcp and resume where I left off. Read CLAUDE.md for full context. Current status: Phase 1 (Android) and Phase 2 (AI vision) are complete and tested. Performance optimization is done. Next priorities are Phase 3 (Flutter widget tree) or npm publish. Check git log for recent changes.
+> Pull https://github.com/saranshbamania/mobile-device-mcp and resume where I left off. Read CLAUDE.md for full context. Current status: Phase 1 (Android), Phase 2 (AI vision), and Phase 3 (Flutter widget tree) are complete and tested. Published to npm as v0.1.0. Next priorities are Phase 4 (iOS support) or Phase 5 (monetization). Check git log for recent changes.

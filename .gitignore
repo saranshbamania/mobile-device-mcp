@@ -14,3 +14,4 @@ test-device.ts
 test-ai.ts
 test-compression.ts
 test-quick.ts
+test-flutter.ts

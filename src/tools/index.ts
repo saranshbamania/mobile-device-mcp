@@ -12,7 +12,9 @@ import { registerInteractionTools } from "./interaction-tools.js";
 import { registerAppTools } from "./app-tools.js";
 import { registerLogTools } from "./log-tools.js";
 import { registerAITools } from "./ai-tools.js";
+import { registerFlutterTools } from "./flutter-tools.js";
 import type { ScreenAnalyzer } from "../ai/analyzer.js";
+import type { FlutterDriver } from "../drivers/flutter/index.js";
 
 export {
   registerDeviceTools,
@@ -20,6 +22,7 @@ export {
   registerInteractionTools,
   registerAppTools,
   registerLogTools,
+  registerFlutterTools,
 };
 
 /**
@@ -31,11 +34,13 @@ export {
  *                      does not need to exist when tools are registered.
  * @param getAnalyzer — A factory/getter that returns the ScreenAnalyzer, or null
  *                      if AI features are disabled.
+ * @param getFlutter  — A factory/getter that returns the FlutterDriver.
  */
 export function registerAllTools(
   server: McpServer,
   getDriver: () => DeviceDriver,
   getAnalyzer: () => ScreenAnalyzer | null,
+  getFlutter: () => FlutterDriver,
 ): void {
   registerDeviceTools(server, getDriver);
   registerScreenTools(server, getDriver);
@@ -43,4 +48,5 @@ export function registerAllTools(
   registerAppTools(server, getDriver);
   registerLogTools(server, getDriver);
   registerAITools(server, getAnalyzer);
+  registerFlutterTools(server, getFlutter);
 }

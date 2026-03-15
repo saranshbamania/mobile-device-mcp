@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { ServerConfig } from "./types.js";
 import { AndroidDriver } from "./drivers/android/index.js";
+import { FlutterDriver } from "./drivers/flutter/index.js";
 import { registerAllTools } from "./tools/index.js";
 import { AIClient } from "./ai/client.js";
 import { ScreenAnalyzer } from "./ai/analyzer.js";
@@ -29,6 +30,7 @@ export function createServer(config: ServerConfig): {
   });
 
   const driver = new AndroidDriver(config.adbPath);
+  const flutterDriver = new FlutterDriver(config.adbPath);
 
   // Set up AI features if configured
   let analyzer: ScreenAnalyzer | null = null;
@@ -41,7 +43,7 @@ export function createServer(config: ServerConfig): {
     });
   }
 
-  registerAllTools(server, () => driver, () => analyzer);
+  registerAllTools(server, () => driver, () => analyzer, () => flutterDriver);
 
   async function start(): Promise<void> {
     const transport = new StdioServerTransport();
