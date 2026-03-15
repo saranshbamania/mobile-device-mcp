@@ -83,7 +83,7 @@ async function main(): Promise<void> {
 
     // Default model depends on provider.
     const defaultModel =
-      provider === "google" ? "gemini-2.0-flash" : "claude-sonnet-4-20250514";
+      provider === "google" ? "gemini-2.5-flash" : "claude-sonnet-4-20250514";
 
     config.ai = {
       provider,

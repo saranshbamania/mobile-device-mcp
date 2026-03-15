@@ -125,7 +125,7 @@ These tools use AI vision (Claude or Gemini) to understand what's on screen. Req
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude vision | — |
 | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Google API key for Gemini vision | — |
 | `MCP_AI_PROVIDER` | Force AI provider: `"anthropic"` or `"google"` | Auto-detected |
-| `MCP_AI_MODEL` | Override AI model | `claude-sonnet-4-20250514` / `gemini-2.0-flash` |
+| `MCP_AI_MODEL` | Override AI model | `claude-sonnet-4-20250514` / `gemini-2.5-flash` |
 | `MCP_ADB_PATH` | Custom ADB binary path | Auto-discovered |
 | `MCP_DEFAULT_DEVICE` | Default device serial | Auto-discovered |
 | `MCP_SCREENSHOT_FORMAT` | `"png"` or `"jpeg"` | `png` |
