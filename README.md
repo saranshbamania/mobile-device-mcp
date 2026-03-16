@@ -28,23 +28,11 @@ Without this tool:                    With this tool:
 - Android device/emulator connected via ADB
 - ADB installed (Android SDK Platform Tools)
 
-### Install & Run
+### Setup (One-time, 30 seconds)
 
-```bash
-# Zero-config — just run it
-npx mobile-device-mcp
-```
+1. **Get a Google AI key** (free tier available): [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
 
-Or install globally:
-
-```bash
-npm install -g mobile-device-mcp
-mobile-device-mcp
-```
-
-### Configure with Claude Code
-
-Add `.mcp.json` to your project root:
+2. **Add `.mcp.json` to your project root:**
 
 ```json
 {
@@ -61,54 +49,45 @@ Add `.mcp.json` to your project root:
 }
 ```
 
-Then open Claude Code from that directory. Verify with `/mcp` — you should see `mobile-device: Connected`.
+3. **Open your AI coding assistant** from that directory. That's it.
 
-Now just talk to your phone:
+The server starts and stops automatically — you never run it manually. Your AI assistant manages it as a background process via the MCP protocol.
+
+### Verify It Works
+
+**Claude Code:** type `/mcp` — you should see `mobile-device: Connected`
+
+**Cursor:** check MCP panel in settings
+
+Then just talk to your phone:
 
 ```
 You: "Open my app, tap the login button, type test@email.com in the email field"
-Claude: [takes screenshot → sees the screen → smart_tap("login button") → smart_type("email field", "test@email.com")]
+AI:  [takes screenshot → sees the screen → smart_tap("login button") → smart_type("email field", "test@email.com")]
+
+You: "Find all the bugs on this screen"
+AI:  [analyze_screen → inspects layout, checks for overflow, missing labels, broken states]
+
+You: "Navigate to settings and verify dark mode works"
+AI:  [smart_tap("settings") → take_screenshot → smart_tap("dark mode toggle") → visual_diff → reports result]
 ```
 
-### Configure with Cursor
+No test scripts. No manual screenshots. Just describe what you want in plain English.
 
-Add to `.cursor/mcp.json`:
+### Works with Any AI Coding Assistant
 
-```json
-{
-  "mcpServers": {
-    "mobile-device": {
-      "command": "npx",
-      "args": ["-y", "mobile-device-mcp"],
-      "env": {
-        "GOOGLE_API_KEY": "your-google-api-key"
-      }
-    }
-  }
-}
-```
+| Tool | Config file | Docs |
+|------|------------|------|
+| **Claude Code** | `.mcp.json` in project root | [claude.ai/docs](https://claude.ai/docs) |
+| **Cursor** | `.cursor/mcp.json` | [cursor.com/docs](https://cursor.com/docs) |
+| **VS Code + Copilot** | MCP settings | [code.visualstudio.com](https://code.visualstudio.com) |
+| **Windsurf** | MCP settings | [windsurf.com](https://windsurf.com) |
 
-### Configure with VS Code / Windsurf
+All use the same JSON config — just put it in the right file for your editor.
 
-Add to your MCP settings:
+### Drop Into Any Project
 
-```json
-{
-  "mcpServers": {
-    "mobile-device": {
-      "command": "npx",
-      "args": ["-y", "mobile-device-mcp"],
-      "env": {
-        "GOOGLE_API_KEY": "your-google-api-key"
-      }
-    }
-  }
-}
-```
-
-### Use It From Any Project
-
-Drop `.mcp.json` into any mobile project (Flutter, React Native, native Android) and Claude Code gets device superpowers in that directory. No test scripts needed — the AI sees the screen and interacts like a human tester.
+Copy `.mcp.json` into any mobile project — Flutter, React Native, Kotlin, Swift — and your AI assistant gets device superpowers in that directory. No global install needed.
 
 ## Tools (34 total)
 
