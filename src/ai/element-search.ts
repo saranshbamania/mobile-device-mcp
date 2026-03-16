@@ -160,10 +160,18 @@ function parseQuery(query: string): ParsedQuery {
     aliasVariants.push(...ALIASES[joined]);
   }
 
-  // If all words were fillers/hints, use the full raw query minus fillers
+  // If all words were fillers/hints, use the original words as tokens.
+  // This handles queries like "To" (a filler word that's also a UI label).
   if (searchTokens.length === 0) {
-    // Use type hints as search tokens as fallback
-    searchTokens.push(...typeHints);
+    if (typeHints.length > 0) {
+      searchTokens.push(...typeHints);
+    } else {
+      // All words were fillers — use them as-is since the user clearly
+      // means to search for that exact text (e.g., "To", "for")
+      for (const word of words) {
+        if (FILLER_WORDS.has(word)) searchTokens.push(word);
+      }
+    }
   }
 
   return { raw, searchTokens, typeHints, numericVariants, aliasVariants };
@@ -317,7 +325,7 @@ function scoreElement(el: UIElement, pq: ParsedQuery): ScoredElement {
           pq.searchTokens.length > 0 ? searchMatched / pq.searchTokens.length : 0,
           pq.aliasVariants.length > 0 ? aliasMatched / pq.aliasVariants.length : 0,
         );
-        const score = 0.7 * bestRatio;
+        const score = 0.75 * bestRatio;
         if (score > bestScore) {
           bestScore = score;
           bestReason = `Content description match: "${el.contentDescription}"`;
@@ -447,7 +455,7 @@ export function searchElementsLocally(
     .map(toAnalyzed);
 
   return {
-    found: best.score > 0.7,
+    found: best.score >= 0.7,
     element: toAnalyzed(best),
     confidence: best.score,
     alternatives,

@@ -30,6 +30,7 @@ import {
   summarizeUIElements,
 } from "./prompts.js";
 import { searchElementsLocally } from "./element-search.js";
+import type { FlutterDriver } from "../drivers/flutter/index.js";
 
 // ----------------------------------------------------------
 // Two-image analysis helper (used for visual diff)
@@ -201,6 +202,9 @@ export class ScreenAnalyzer {
   } = {};
   private cacheTTL: number = 3000; // 3 seconds
 
+  /** Track when getUIElements returns empty (Flutter apps) to avoid redundant calls. */
+  private lastUIElementsEmpty: boolean = false;
+
   /** Screenshot options used for AI analysis (compressed for performance). */
   private screenshotOptions: ScreenshotOptions;
 
@@ -216,6 +220,7 @@ export class ScreenAnalyzer {
       maxTokens: number;
     },
     screenshotOptions?: ScreenshotOptions,
+    private flutterDriver?: FlutterDriver,
   ) {
     // Default: JPEG at quality 80, resize to 720px for AI — saves tokens
     this.screenshotOptions = screenshotOptions ?? {
@@ -267,6 +272,19 @@ export class ScreenAnalyzer {
     query: string,
   ): Promise<ElementMatch> {
     try {
+      // --- Flutter fast path (Tier 0): widget tree search + coordinate resolution ---
+      // This bypasses AI entirely when Flutter is connected: ~200ms vs ~10s
+      if (this.flutterDriver?.isConnected) {
+        try {
+          const flutterMatch = await this.flutterDriver.findWidgetForTap(query, deviceId);
+          if (flutterMatch && flutterMatch.found && flutterMatch.confidence > 0.5) {
+            return flutterMatch as ElementMatch;
+          }
+        } catch {
+          // Flutter fast path failed — fall through to standard paths
+        }
+      }
+
       // --- Fast path: local UI tree search (no AI call) ---
       if (this.config.analyzeWithUITree) {
         const uiElements = await this.getUIElements(deviceId);
@@ -548,8 +566,10 @@ export class ScreenAnalyzer {
         interactiveOnly: false,
       });
       this.cache.uiElements = { data: elements, timestamp: Date.now() };
+      this.lastUIElementsEmpty = !elements || elements.length === 0;
       return elements;
     } catch {
+      this.lastUIElementsEmpty = true;
       return undefined;
     }
   }
@@ -597,13 +617,14 @@ export class ScreenAnalyzer {
       );
     }
 
-    if (this.config.analyzeWithUITree && !cachedUIElements) {
+    if (this.config.analyzeWithUITree && !cachedUIElements && !this.lastUIElementsEmpty) {
       promises.push(
         this.driver
           .getUIElements(deviceId, { interactiveOnly: false })
           .then((e) => {
             ctx.uiElements = e;
             this.cache.uiElements = { data: e, timestamp: now };
+            this.lastUIElementsEmpty = !e || e.length === 0;
           }),
       );
     }
@@ -628,6 +649,8 @@ export class ScreenAnalyzer {
    */
   private invalidateCache(): void {
     this.cache.screenshot = undefined;
+    // Don't reset lastUIElementsEmpty here — if the tree was empty
+    // (Flutter app), it'll stay empty until we navigate to a different app.
   }
 
   /**

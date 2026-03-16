@@ -40,7 +40,7 @@ export function createServer(config: ServerConfig): {
       format: config.screenshotFormat,
       quality: config.screenshotQuality,
       maxWidth: config.screenshotMaxWidth,
-    });
+    }, flutterDriver);
   }
 
   registerAllTools(server, () => driver, () => analyzer, () => flutterDriver);
