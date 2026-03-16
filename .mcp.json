@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mobile-device": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "D:/mobile-device-mcp/dist/index.js"
+      ],
+      "env": {
+        "GOOGLE_API_KEY": "AIzaSyAKtcaZN96IUFeFUtvm5KZzVf4d9wSGPaY"
+      }
+    }
+  }
+}
