@@ -44,12 +44,13 @@ mobile-device-mcp
 
 ### Configure with Claude Code
 
-Add to your Claude Code MCP settings (`~/.claude/settings.json`):
+Add `.mcp.json` to your project root:
 
 ```json
 {
   "mcpServers": {
     "mobile-device": {
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "mobile-device-mcp"],
       "env": {
@@ -58,6 +59,15 @@ Add to your Claude Code MCP settings (`~/.claude/settings.json`):
     }
   }
 }
+```
+
+Then open Claude Code from that directory. Verify with `/mcp` — you should see `mobile-device: Connected`.
+
+Now just talk to your phone:
+
+```
+You: "Open my app, tap the login button, type test@email.com in the email field"
+Claude: [takes screenshot → sees the screen → smart_tap("login button") → smart_type("email field", "test@email.com")]
 ```
 
 ### Configure with Cursor
@@ -95,6 +105,10 @@ Add to your MCP settings:
   }
 }
 ```
+
+### Use It From Any Project
+
+Drop `.mcp.json` into any mobile project (Flutter, React Native, native Android) and Claude Code gets device superpowers in that directory. No test scripts needed — the AI sees the screen and interacts like a human tester.
 
 ## Tools (34 total)
 
