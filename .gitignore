@@ -3,6 +3,12 @@ dist/
 *.tsbuildinfo
 .env
 .env.local
+.mcp.json
+bug-screenshots/
+smart-test*.mjs
+smart-final*.mjs
+go.mjs
+test-metroping-bugs.mjs
 *.log
 .axon/
 .claude/
