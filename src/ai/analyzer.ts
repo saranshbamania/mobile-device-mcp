@@ -299,26 +299,27 @@ export class ScreenAnalyzer {
           }
         }
 
-        // Fresh UI tree — interactive-only first (faster, smaller payload)
+        // Fresh UI tree — single dump, search interactive-only first, then full
         const t1 = Date.now();
-        const interactiveElements = await this.getUIElements(deviceId, false, true);
-        const dumpMs = Date.now() - t1;
-        if (interactiveElements && interactiveElements.length > 0) {
-          const localMatch = searchElementsLocally(interactiveElements, query);
-          if (localMatch.found && localMatch.confidence > 0.5) {
-            console.error(`[findElement] Tier 2a (fresh interactive): "${query}" → conf=${localMatch.confidence.toFixed(2)} in ${Date.now() - t0}ms (dump=${dumpMs}ms)`);
-            return localMatch;
-          }
-        }
-
-        // Full tree fallback if interactive-only didn't match
-        const t2 = Date.now();
         const fullElements = await this.getUIElements(deviceId);
-        const dump2Ms = Date.now() - t2;
+        const dumpMs = Date.now() - t1;
         if (fullElements && fullElements.length > 0) {
+          // Try interactive-only subset first (buttons, inputs, etc.)
+          const interactiveElements = fullElements.filter(
+            (e) => e.clickable || e.focusable || e.scrollable
+          );
+          if (interactiveElements.length > 0) {
+            const localMatch = searchElementsLocally(interactiveElements, query);
+            if (localMatch.found && localMatch.confidence > 0.5) {
+              console.error(`[findElement] Tier 2a (fresh interactive): "${query}" → conf=${localMatch.confidence.toFixed(2)} in ${Date.now() - t0}ms (dump=${dumpMs}ms)`);
+              return localMatch;
+            }
+          }
+
+          // Full tree fallback (includes non-interactive text, labels, etc.)
           const localMatch = searchElementsLocally(fullElements, query);
           if (localMatch.found && localMatch.confidence > 0.5) {
-            console.error(`[findElement] Tier 2b (fresh full): "${query}" → conf=${localMatch.confidence.toFixed(2)} in ${Date.now() - t0}ms (dump=${dump2Ms}ms)`);
+            console.error(`[findElement] Tier 2b (fresh full): "${query}" → conf=${localMatch.confidence.toFixed(2)} in ${Date.now() - t0}ms (dump=${dumpMs}ms)`);
             return localMatch;
           }
         }
@@ -438,8 +439,16 @@ export class ScreenAnalyzer {
     try {
       this.assertClientAvailable();
 
-      // Always need a screenshot for OCR — ignore UITree config.
-      const screenshot = await this.driver.takeScreenshot(deviceId, this.screenshotOptions);
+      // Use cached screenshot if very fresh (<1s), otherwise capture new.
+      // Shorter TTL than general cache (5s) because text extraction needs current content.
+      let screenshot: ScreenshotResult;
+      const cached = this.cache.screenshot;
+      if (cached && (Date.now() - cached.timestamp) < 1000) {
+        screenshot = cached.data;
+      } else {
+        screenshot = await this.driver.takeScreenshot(deviceId, this.screenshotOptions);
+        this.cache.screenshot = { data: screenshot, timestamp: Date.now() };
+      }
       const userPrompt = buildExtractTextPrompt();
 
       const result = await this.client.analyzeJSON<{ texts: string[] }>({

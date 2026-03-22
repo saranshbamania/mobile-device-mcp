@@ -380,28 +380,33 @@ export class AndroidDriver implements DeviceDriver {
 
     // Strategy 1: UIAutomator dump (fast path)
     let t1 = Date.now();
-    let elements = await this.tryUIAutomatorDump(deviceId, options);
-    if (elements.length > 0) {
-      console.error(`[getUIElements] Strategy 1 (uiautomator): ${elements.length} elements in ${Date.now() - t1}ms (total ${Date.now() - t0}ms)`);
-      return elements;
+    let dump = await this.tryUIAutomatorDump(deviceId, options);
+    if (dump.elements.length > 0) {
+      console.error(`[getUIElements] Strategy 1 (uiautomator): ${dump.elements.length} elements in ${Date.now() - t1}ms (total ${Date.now() - t0}ms)`);
+      return dump.elements;
     }
     console.error(`[getUIElements] Strategy 1 (uiautomator): empty in ${Date.now() - t1}ms`);
 
-    // Strategy 2: Retry after delay — catches rendering lag
-    await sleep(500);
-    t1 = Date.now();
-    elements = await this.tryUIAutomatorDump(deviceId, options);
-    if (elements.length > 0) {
-      console.error(`[getUIElements] Strategy 2 (uiautomator retry): ${elements.length} elements in ${Date.now() - t1}ms (total ${Date.now() - t0}ms)`);
-      return elements;
+    // Strategy 2: Retry after delay — but only if UIAutomator executed successfully
+    // (empty result = rendering lag, retry helps; command failed = retry won't help)
+    if (dump.executed) {
+      await sleep(500);
+      t1 = Date.now();
+      dump = await this.tryUIAutomatorDump(deviceId, options);
+      if (dump.elements.length > 0) {
+        console.error(`[getUIElements] Strategy 2 (uiautomator retry): ${dump.elements.length} elements in ${Date.now() - t1}ms (total ${Date.now() - t0}ms)`);
+        return dump.elements;
+      }
+      console.error(`[getUIElements] Strategy 2 (uiautomator retry): empty in ${Date.now() - t1}ms`);
+    } else {
+      console.error(`[getUIElements] Strategy 1 failed (not empty), skipping 500ms retry`);
     }
-    console.error(`[getUIElements] Strategy 2 (uiautomator retry): empty in ${Date.now() - t1}ms`);
 
     // Strategy 3: Accessibility dump fallback
     t1 = Date.now();
-    elements = await this.tryAccessibilityDump(deviceId, options);
-    console.error(`[getUIElements] Strategy 3 (a11y dump): ${elements.length} elements in ${Date.now() - t1}ms (total ${Date.now() - t0}ms)`);
-    return elements;
+    const a11yElements = await this.tryAccessibilityDump(deviceId, options);
+    console.error(`[getUIElements] Strategy 3 (a11y dump): ${a11yElements.length} elements in ${Date.now() - t1}ms (total ${Date.now() - t0}ms)`);
+    return a11yElements;
   }
 
   // ================================================================
@@ -858,7 +863,7 @@ export class AndroidDriver implements DeviceDriver {
    * 2. File-based dump to /sdcard + cat (slower, more compatible)
    * Returns empty array if both fail (instead of throwing).
    */
-  private async tryUIAutomatorDump(deviceId: string, options?: UIElementOptions): Promise<UIElement[]> {
+  private async tryUIAutomatorDump(deviceId: string, options?: UIElementOptions): Promise<{ elements: UIElement[]; executed: boolean }> {
     // Approach 1: exec-out to /dev/tty (fast, direct stdout)
     const result = await this.adb.execute(
       ["exec-out", "uiautomator", "dump", "/dev/tty"],
@@ -866,7 +871,7 @@ export class AndroidDriver implements DeviceDriver {
     );
 
     if (result.stdout && result.stdout.includes("<node")) {
-      return this.parseUIHierarchy(result.stdout, options);
+      return { elements: this.parseUIHierarchy(result.stdout, options), executed: true };
     }
 
     // Approach 2: file-based fallback
@@ -875,7 +880,7 @@ export class AndroidDriver implements DeviceDriver {
       deviceId,
     );
     if (dumpResult.exitCode !== 0) {
-      return [];
+      return { elements: [], executed: false };
     }
 
     const catResult = await this.adb.execute(
@@ -883,10 +888,10 @@ export class AndroidDriver implements DeviceDriver {
       deviceId,
     );
     if (catResult.exitCode === 0 && catResult.stdout.includes("<node")) {
-      return this.parseUIHierarchy(catResult.stdout, options);
+      return { elements: this.parseUIHierarchy(catResult.stdout, options), executed: true };
     }
 
-    return [];
+    return { elements: [], executed: true };
   }
 
   /**
