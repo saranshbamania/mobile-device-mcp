@@ -43,13 +43,15 @@
     "node": ">=18.0.0"
   },
   "files": [
-    "dist"
+    "dist",
+    "assets"
   ],
   "keywords": [
     "mcp",
     "model-context-protocol",
     "mobile",
     "android",
+    "ios",
     "adb",
     "flutter",
     "ai",

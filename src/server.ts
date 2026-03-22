@@ -7,9 +7,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { ServerConfig } from "./types.js";
 import { AndroidDriver } from "./drivers/android/index.js";
 import { FlutterDriver } from "./drivers/flutter/index.js";
+import { IOSSimulatorDriver } from "./drivers/ios/index.js";
 import { registerAllTools } from "./tools/index.js";
 import { AIClient } from "./ai/client.js";
 import { ScreenAnalyzer } from "./ai/analyzer.js";
+import { ActionRecorder } from "./recording/recorder.js";
 
 /** Server version — matches package.json */
 const SERVER_VERSION = "0.1.0";
@@ -32,6 +34,12 @@ export function createServer(config: ServerConfig): {
   const driver = new AndroidDriver(config.adbPath);
   const flutterDriver = new FlutterDriver(config.adbPath);
 
+  // iOS simulator support (macOS only)
+  let iosDriver: IOSSimulatorDriver | null = null;
+  if (process.platform === "darwin") {
+    iosDriver = new IOSSimulatorDriver();
+  }
+
   // Set up AI features if configured
   let analyzer: ScreenAnalyzer | null = null;
   if (config.ai && config.ai.apiKey) {
@@ -43,7 +51,9 @@ export function createServer(config: ServerConfig): {
     }, flutterDriver);
   }
 
-  registerAllTools(server, () => driver, () => analyzer, () => flutterDriver);
+  const recorder = new ActionRecorder();
+
+  registerAllTools(server, () => driver, () => analyzer, () => flutterDriver, () => driver, () => recorder, () => iosDriver);
 
   async function start(): Promise<void> {
     const transport = new StdioServerTransport();

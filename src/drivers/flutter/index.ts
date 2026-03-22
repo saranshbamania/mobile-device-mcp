@@ -545,6 +545,70 @@ export class FlutterDriver {
   }
 
   /**
+   * Trigger a hot reload on the connected Flutter app.
+   * Pushes code changes without losing app state.
+   */
+  async hotReload(): Promise<{ success: boolean; message: string }> {
+    this.assertConnected();
+    try {
+      const isolateId = await this.ensureValidIsolate();
+      const result = await this.client!.callExtension(
+        "ext.flutter.reassemble",
+        isolateId,
+      ) as { type?: string };
+      this.cachedLibraryId = null; // library IDs may change
+      return {
+        success: true,
+        message: result?.type === "Success" ? "Hot reload completed successfully." : "Hot reload triggered.",
+      };
+    } catch (err) {
+      return {
+        success: false,
+        message: `Hot reload failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  /**
+   * Trigger a hot restart on the connected Flutter app.
+   * Restarts the app from scratch (loses state) but applies all changes
+   * including static field initializers and global variable changes.
+   */
+  async hotRestart(): Promise<{ success: boolean; message: string }> {
+    this.assertConnected();
+    try {
+      const isolateId = await this.ensureValidIsolate();
+      const result = await this.client!.callExtension(
+        "ext.flutter.hotRestart",
+        isolateId,
+      ) as { type?: string };
+      // Reset caches since everything changes after restart
+      this.cachedLibraryId = null;
+      this.cachedDpr = null;
+      this.evaluateUnavailable = false;
+      // Re-discover isolate since hot restart creates a new one
+      try {
+        const { isolateId: newId } = await this.findFlutterIsolate();
+        this.isolateId = newId;
+        if (this.connection) {
+          this.connection.isolateId = newId;
+        }
+      } catch {
+        // Isolate re-discovery may fail briefly, that's ok
+      }
+      return {
+        success: true,
+        message: result?.type === "Success" ? "Hot restart completed successfully." : "Hot restart triggered.",
+      };
+    } catch (err) {
+      return {
+        success: false,
+        message: `Hot restart failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  /**
    * Check whether widget creation location tracking is enabled.
    */
   async isCreationTrackingEnabled(): Promise<boolean> {

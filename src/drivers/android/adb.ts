@@ -3,8 +3,11 @@
 // Handles all communication with the `adb` binary.
 // ============================================================
 
-import { execFile as execFileCb } from "node:child_process";
+import { execFile as execFileCb, spawn as spawnCb } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
+
+export type { ChildProcess } from "node:child_process";
 import type { ADBResult } from "../../types.js";
 
 const execFile = promisify(execFileCb);
@@ -100,6 +103,19 @@ export class ADB {
         reject(err);
       });
     });
+  }
+
+  /**
+   * Spawn a long-running ADB command without waiting for it to complete.
+   * Returns the ChildProcess handle for later control (e.g., screenrecord).
+   */
+  spawn(args: string[], deviceId?: string): ChildProcess {
+    const fullArgs = this.buildArgs(args, deviceId);
+    const child = spawnCb(this.adbPath, fullArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    return child;
   }
 
   // ------------------------------------------------------------------

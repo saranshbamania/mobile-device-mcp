@@ -332,6 +332,75 @@ export function registerFlutterTools(
   );
 
   // ----------------------------------------------------------
+  // flutter_hot_reload
+  // ----------------------------------------------------------
+  server.registerTool(
+    "flutter_hot_reload",
+    {
+      title: "Flutter Hot Reload",
+      description:
+        "Trigger a hot reload on the connected Flutter app. Pushes code changes " +
+        "without losing app state — variables, navigation stack, and scroll positions " +
+        "are preserved. Much faster than a full restart. Call flutter_connect first.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      try {
+        const flutter = getFlutter();
+        const result = await flutter.hotReload();
+        return {
+          content: [{
+            type: "text" as const,
+            text: result.message,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          }],
+        };
+      }
+    },
+  );
+
+  // ----------------------------------------------------------
+  // flutter_hot_restart
+  // ----------------------------------------------------------
+  server.registerTool(
+    "flutter_hot_restart",
+    {
+      title: "Flutter Hot Restart",
+      description:
+        "Trigger a hot restart on the connected Flutter app. Restarts the app from " +
+        "scratch, losing all state, but applies all code changes including static field " +
+        "initializers and global variables. Use when hot reload is insufficient. " +
+        "Call flutter_connect first.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      try {
+        const flutter = getFlutter();
+        const result = await flutter.hotRestart();
+        return {
+          content: [{
+            type: "text" as const,
+            text: result.message,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          }],
+        };
+      }
+    },
+  );
+
+  // ----------------------------------------------------------
   // flutter_debug_paint
   // ----------------------------------------------------------
   server.registerTool(

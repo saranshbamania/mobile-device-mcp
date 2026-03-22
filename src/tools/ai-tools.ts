@@ -302,4 +302,123 @@ export function registerAITools(
       }
     },
   );
+
+  // ----------------------------------------------------------
+  // wait_for_settle
+  // ----------------------------------------------------------
+  server.registerTool(
+    "wait_for_settle",
+    {
+      title: "Wait for Screen to Settle",
+      description:
+        "Waits for the screen to stop changing after a navigation or action. Polls the UI tree until two consecutive snapshots are identical, indicating animations and loading have completed. Use this after tapping navigation buttons or triggering screen transitions to ensure the new screen is ready for interaction.",
+      inputSchema: z.object({
+        device_id: z.string().describe("Device serial ID"),
+        timeout: z.number().optional().default(3000)
+          .describe("Maximum time to wait in milliseconds (default: 3000)"),
+        poll_interval: z.number().optional().default(500)
+          .describe("Time between polls in milliseconds (default: 500)"),
+      }),
+    },
+    async ({ device_id, timeout, poll_interval }) => {
+      try {
+        const analyzer = getAnalyzer();
+        if (!analyzer) return AI_UNAVAILABLE;
+        const result = await analyzer.waitForScreenSettle(device_id, {
+          timeout,
+          pollInterval: poll_interval,
+        });
+        return jsonResponse(result);
+      } catch (error) {
+        return errorResponse("wait_for_settle", error);
+      }
+    },
+  );
+
+  // ----------------------------------------------------------
+  // wait_for_element
+  // ----------------------------------------------------------
+  server.registerTool(
+    "wait_for_element",
+    {
+      title: "Wait for Element to Appear",
+      description:
+        "Waits for a specific UI element to appear on screen by polling the UI tree. More reliable and faster than wait_for_settle — returns as soon as the target element is found. Use after navigation to wait for a specific button, text, or field to appear. Example: wait_for_element('Find Routes') after selecting a station.",
+      inputSchema: z.object({
+        device_id: z.string().describe("Device serial ID"),
+        query: z.string().describe("Description of the element to wait for, e.g. 'Find Routes button' or 'search results'"),
+        timeout: z.number().optional().default(5000)
+          .describe("Maximum time to wait in milliseconds (default: 5000)"),
+        poll_interval: z.number().optional().default(300)
+          .describe("Time between polls in milliseconds (default: 300)"),
+      }),
+    },
+    async ({ device_id, query, timeout, poll_interval }) => {
+      try {
+        const analyzer = getAnalyzer();
+        if (!analyzer) return AI_UNAVAILABLE;
+        const result = await analyzer.waitForElement(device_id, query, {
+          timeout,
+          pollInterval: poll_interval,
+        });
+        return jsonResponse(result);
+      } catch (error) {
+        return errorResponse("wait_for_element", error);
+      }
+    },
+  );
+
+  // ----------------------------------------------------------
+  // handle_popup
+  // ----------------------------------------------------------
+  server.registerTool(
+    "handle_popup",
+    {
+      title: "Handle Popup / Dismiss Dialog",
+      description:
+        "Detects and handles system dialogs and popups (permission requests, update prompts, system alerts). Can automatically dismiss or accept the dialog. Use 'dismiss' to decline/skip, 'accept' to allow/confirm, or 'auto' to handle it automatically.",
+      inputSchema: z.object({
+        device_id: z.string().describe("Device serial ID"),
+        action: z.enum(["dismiss", "accept", "auto"]).optional().default("auto")
+          .describe("How to handle the popup: 'dismiss' (deny/cancel), 'accept' (allow/ok), 'auto' (handle automatically)"),
+      }),
+    },
+    async ({ device_id, action }) => {
+      try {
+        const analyzer = getAnalyzer();
+        if (!analyzer) return AI_UNAVAILABLE;
+        const result = await analyzer.handlePopup(device_id, action);
+        return jsonResponse(result);
+      } catch (error) {
+        return errorResponse("handle_popup", error);
+      }
+    },
+  );
+
+  // ----------------------------------------------------------
+  // fill_form
+  // ----------------------------------------------------------
+  server.registerTool(
+    "fill_form",
+    {
+      title: "Fill Form",
+      description:
+        "Fill multiple form fields in a single operation. Provide a map of field descriptions to values. Each field is found by natural language description, cleared, and filled with the specified value. More efficient than calling smart_type multiple times.",
+      inputSchema: z.object({
+        device_id: z.string().describe("Device serial ID"),
+        fields: z.record(z.string(), z.string())
+          .describe('Map of field descriptions to values, e.g. {"Email": "user@test.com", "Password": "secret123"}'),
+      }),
+    },
+    async ({ device_id, fields }) => {
+      try {
+        const analyzer = getAnalyzer();
+        if (!analyzer) return AI_UNAVAILABLE;
+        const result = await analyzer.fillForm(device_id, fields);
+        return jsonResponse(result);
+      } catch (error) {
+        return errorResponse("fill_form", error);
+      }
+    },
+  );
 }
