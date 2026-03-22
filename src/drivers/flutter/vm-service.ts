@@ -212,6 +212,22 @@ export class VmServiceClient {
     return await this.call(method, { isolateId, ...args });
   }
 
+  /**
+   * Evaluate a Dart expression in the context of a library or object.
+   * Used to run Dart code remotely for coordinate resolution.
+   */
+  async evaluate(
+    isolateId: string,
+    targetId: string,
+    expression: string,
+  ): Promise<EvalResult> {
+    return await this.call("evaluate", {
+      isolateId,
+      targetId,
+      expression,
+    }) as EvalResult;
+  }
+
   // ----------------------------------------------------------------
   // Private
   // ----------------------------------------------------------------
@@ -332,4 +348,12 @@ export interface SourceLocation {
     column: number;
     name: string;
   }>;
+}
+
+export interface EvalResult {
+  type: string;
+  valueAsString?: string;
+  valueAsStringIsTruncated?: boolean;
+  kind?: string;
+  id?: string;
 }

@@ -3,6 +3,11 @@
 // ============================================================
 
 import { ADB } from "./adb.js";
+import type { ChildProcess } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { CompanionClient } from "./companion-client.js";
 import type {
   ADBResult,
   AppInfo,
@@ -103,8 +108,107 @@ function parseNodeElement(nodeStr: string, index: number): UIElement {
 export class AndroidDriver implements DeviceDriver {
   private readonly adb: ADB;
 
+  /** Per-device companion app clients (cached). */
+  private companionClients = new Map<string, CompanionClient>();
+  /** Devices where companion connection already failed (avoid repeated latency). */
+  private companionUnavailable = new Set<string>();
+
+  /** Active screen recordings per device. */
+  private recordings = new Map<string, { process: ChildProcess; devicePath: string; startTime: number }>();
+
   constructor(adbPath: string = "adb") {
     this.adb = new ADB(adbPath);
+  }
+
+  /**
+   * Try to get a connected CompanionClient for the given device.
+   * Returns null if the companion app is not installed or not reachable.
+   * Caches the result to avoid repeated connection attempts.
+   */
+  private async getCompanionClient(deviceId: string): Promise<CompanionClient | null> {
+    // Return existing connected client
+    const existing = this.companionClients.get(deviceId);
+    if (existing?.isConnected) return existing;
+
+    // Don't retry if we already know it's unavailable
+    if (this.companionUnavailable.has(deviceId)) return null;
+
+    // Try to connect
+    const client = new CompanionClient(this.adb, deviceId);
+    const connected = await client.connect();
+
+    if (connected) {
+      this.companionClients.set(deviceId, client);
+      return client;
+    }
+
+    // Connection failed — try auto-installing the companion app
+    const installed = await client.isInstalled();
+    if (!installed) {
+      const apkPath = this.findCompanionApk();
+      if (apkPath) {
+        console.error(`[mobile-device-mcp] Auto-installing companion app on ${deviceId}...`);
+        const installOk = await client.install(apkPath);
+        if (installOk) {
+          console.error(`[mobile-device-mcp] Companion app installed. Enabling accessibility service...`);
+          await client.enableService();
+          // Wait for the service to start
+          await sleep(2000);
+          // Retry connection
+          const retryConnected = await client.connect();
+          if (retryConnected) {
+            console.error(`[mobile-device-mcp] Companion app connected successfully.`);
+            this.companionClients.set(deviceId, client);
+            return client;
+          }
+          console.error(`[mobile-device-mcp] Companion app installed but could not connect. User may need to enable the accessibility service manually in Settings.`);
+        }
+      }
+    }
+
+    // Mark as unavailable so we don't retry on every getUIElements call
+    this.companionUnavailable.add(deviceId);
+    return null;
+  }
+
+  /**
+   * Find the companion APK bundled with the package.
+   * Checks several possible locations relative to the module.
+   */
+  private findCompanionApk(): string | null {
+    try {
+      const thisFile = fileURLToPath(import.meta.url);
+      const packageRoot = dirname(dirname(dirname(thisFile))); // up from drivers/android/ to root
+
+      const candidates = [
+        join(packageRoot, "assets", "companion-app.apk"),
+        join(packageRoot, "companion-app", "app", "build", "outputs", "apk", "debug", "app-debug.apk"),
+        join(packageRoot, "..", "assets", "companion-app.apk"),
+        join(packageRoot, "..", "companion-app", "app", "build", "outputs", "apk", "debug", "app-debug.apk"),
+      ];
+
+      for (const candidate of candidates) {
+        if (existsSync(candidate)) {
+          return candidate;
+        }
+      }
+    } catch {
+      // import.meta.url resolution may fail in some environments
+    }
+    return null;
+  }
+
+  /**
+   * Reset companion availability for a device.
+   * Call this to force a reconnection attempt (e.g., after installing the companion app).
+   */
+  resetCompanion(deviceId: string): void {
+    this.companionUnavailable.delete(deviceId);
+    const existing = this.companionClients.get(deviceId);
+    if (existing) {
+      existing.disconnect().catch(() => {});
+      this.companionClients.delete(deviceId);
+    }
   }
 
   // ================================================================
@@ -230,61 +334,74 @@ export class AndroidDriver implements DeviceDriver {
   // ================================================================
 
   async takeScreenshot(deviceId: string, options?: ScreenshotOptions): Promise<ScreenshotResult> {
-    const timestamp = Date.now();
+    const t0 = Date.now();
 
     const pngBuffer = await this.adb.executeBuffer(["exec-out", "screencap", "-p"], deviceId);
+    const captureMs = Date.now() - t0;
 
     if (pngBuffer.length === 0) {
       throw new Error(`Screenshot returned empty buffer for device ${deviceId}`);
     }
 
-    // Process: resize and/or convert to JPEG based on options
+    const t1 = Date.now();
     const processed = processScreenshot(pngBuffer, options);
+    const processMs = Date.now() - t1;
+
+    console.error(`[takeScreenshot] capture=${captureMs}ms process=${processMs}ms total=${Date.now() - t0}ms | ${processed.width}x${processed.height} ${processed.format} ${(processed.sizeBytes / 1024).toFixed(1)}KB`);
 
     return {
       base64: processed.base64,
       width: processed.width,
       height: processed.height,
       format: processed.format,
-      timestamp,
+      timestamp: t0,
       sizeBytes: processed.sizeBytes,
     };
   }
 
   async getUIElements(deviceId: string, options?: UIElementOptions): Promise<UIElement[]> {
-    // uiautomator dump outputs XML to the given path. Using /dev/tty with
-    // exec-out gives us the XML directly on stdout.
-    const result = await this.adb.execute(
-      ["exec-out", "uiautomator", "dump", "/dev/tty"],
-      deviceId,
-    );
+    const t0 = Date.now();
 
-    // uiautomator may return exit code 0 but also print
-    // "UI hierchary dumped to: /dev/tty" — we just need the XML.
-    const output = result.stdout;
-
-    if (!output || !output.includes("<node")) {
-      // Fallback: try the file-based approach
-      const dumpResult = await this.adb.execute(
-        ["shell", "uiautomator", "dump", "/sdcard/window_dump.xml"],
-        deviceId,
-      );
-      if (dumpResult.exitCode !== 0) {
-        throw new Error(`Failed to dump UI hierarchy for ${deviceId}: ${dumpResult.stderr}`);
+    // Strategy 0: Companion app (instant, complete tree via AccessibilityService)
+    const companion = await this.getCompanionClient(deviceId);
+    if (companion) {
+      try {
+        const t = Date.now();
+        const elements = await companion.getTree(options?.interactiveOnly ?? false);
+        if (elements.length > 0) {
+          console.error(`[getUIElements] Strategy 0 (companion): ${elements.length} elements in ${Date.now() - t}ms (total ${Date.now() - t0}ms)`);
+          return elements;
+        }
+        console.error(`[getUIElements] Strategy 0 (companion): empty in ${Date.now() - t}ms`);
+      } catch {
+        console.error(`[getUIElements] Strategy 0 (companion): failed in ${Date.now() - t0}ms`);
       }
-
-      const catResult = await this.adb.execute(
-        ["shell", "cat", "/sdcard/window_dump.xml"],
-        deviceId,
-      );
-      if (catResult.exitCode !== 0 || !catResult.stdout.includes("<node")) {
-        throw new Error(`Failed to read UI dump for ${deviceId}: ${catResult.stderr}`);
-      }
-
-      return this.parseUIHierarchy(catResult.stdout, options);
     }
 
-    return this.parseUIHierarchy(output, options);
+    // Strategy 1: UIAutomator dump (fast path)
+    let t1 = Date.now();
+    let elements = await this.tryUIAutomatorDump(deviceId, options);
+    if (elements.length > 0) {
+      console.error(`[getUIElements] Strategy 1 (uiautomator): ${elements.length} elements in ${Date.now() - t1}ms (total ${Date.now() - t0}ms)`);
+      return elements;
+    }
+    console.error(`[getUIElements] Strategy 1 (uiautomator): empty in ${Date.now() - t1}ms`);
+
+    // Strategy 2: Retry after delay — catches rendering lag
+    await sleep(500);
+    t1 = Date.now();
+    elements = await this.tryUIAutomatorDump(deviceId, options);
+    if (elements.length > 0) {
+      console.error(`[getUIElements] Strategy 2 (uiautomator retry): ${elements.length} elements in ${Date.now() - t1}ms (total ${Date.now() - t0}ms)`);
+      return elements;
+    }
+    console.error(`[getUIElements] Strategy 2 (uiautomator retry): empty in ${Date.now() - t1}ms`);
+
+    // Strategy 3: Accessibility dump fallback
+    t1 = Date.now();
+    elements = await this.tryAccessibilityDump(deviceId, options);
+    console.error(`[getUIElements] Strategy 3 (a11y dump): ${elements.length} elements in ${Date.now() - t1}ms (total ${Date.now() - t0}ms)`);
+    return elements;
   }
 
   // ================================================================
@@ -595,6 +712,95 @@ export class AndroidDriver implements DeviceDriver {
   }
 
   // ================================================================
+  // Video recording
+  // ================================================================
+
+  /**
+   * Start recording the device screen.
+   * Only one recording per device at a time. Android limit: 3 minutes max.
+   */
+  async startRecording(
+    deviceId: string,
+    options?: { maxDuration?: number; bitRate?: number; resolution?: string },
+  ): Promise<{ success: boolean; devicePath: string }> {
+    if (this.recordings.has(deviceId)) {
+      throw new Error(`Already recording on device ${deviceId}. Stop the current recording first.`);
+    }
+
+    const timestamp = Date.now();
+    const devicePath = `/sdcard/mcp-recording-${timestamp}.mp4`;
+
+    const args = ["shell", "screenrecord"];
+    if (options?.maxDuration) {
+      args.push("--time-limit", String(Math.min(options.maxDuration, 180)));
+    }
+    if (options?.bitRate) {
+      args.push("--bit-rate", String(options.bitRate));
+    }
+    if (options?.resolution) {
+      args.push("--size", options.resolution);
+    }
+    args.push(devicePath);
+
+    const child = this.adb.spawn(args, deviceId);
+    this.recordings.set(deviceId, { process: child, devicePath, startTime: timestamp });
+
+    // Auto-cleanup when process exits
+    child.on("exit", () => {
+      this.recordings.delete(deviceId);
+    });
+
+    return { success: true, devicePath };
+  }
+
+  /**
+   * Stop an active screen recording and optionally pull the file to host.
+   */
+  async stopRecording(
+    deviceId: string,
+    pullToPath?: string,
+  ): Promise<{ success: boolean; devicePath: string; localPath?: string; durationMs: number }> {
+    const recording = this.recordings.get(deviceId);
+    if (!recording) {
+      throw new Error(`No active recording on device ${deviceId}.`);
+    }
+
+    const durationMs = Date.now() - recording.startTime;
+    const devicePath = recording.devicePath;
+
+    // Send SIGINT to stop recording gracefully
+    recording.process.kill("SIGINT");
+
+    // Wait for the process to finish writing
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        recording.process.kill("SIGKILL");
+        resolve();
+      }, 5000);
+
+      recording.process.on("exit", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+
+    this.recordings.delete(deviceId);
+
+    // Brief delay for file to be finalized on device
+    await new Promise(r => setTimeout(r, 500));
+
+    let localPath: string | undefined;
+    if (pullToPath) {
+      const pullResult = await this.adb.execute(["pull", devicePath, pullToPath], deviceId);
+      if (pullResult.exitCode === 0) {
+        localPath = pullToPath;
+      }
+    }
+
+    return { success: true, devicePath, localPath, durationMs };
+  }
+
+  // ================================================================
   // Private helpers
   // ================================================================
 
@@ -641,6 +847,192 @@ export class AndroidDriver implements DeviceDriver {
 
     return props;
   }
+
+  // ----------------------------------------------------------
+  // Multi-strategy UI element capture
+  // ----------------------------------------------------------
+
+  /**
+   * Try UIAutomator dump via two approaches:
+   * 1. exec-out to /dev/tty (fast, single command)
+   * 2. File-based dump to /sdcard + cat (slower, more compatible)
+   * Returns empty array if both fail (instead of throwing).
+   */
+  private async tryUIAutomatorDump(deviceId: string, options?: UIElementOptions): Promise<UIElement[]> {
+    // Approach 1: exec-out to /dev/tty (fast, direct stdout)
+    const result = await this.adb.execute(
+      ["exec-out", "uiautomator", "dump", "/dev/tty"],
+      deviceId,
+    );
+
+    if (result.stdout && result.stdout.includes("<node")) {
+      return this.parseUIHierarchy(result.stdout, options);
+    }
+
+    // Approach 2: file-based fallback
+    const dumpResult = await this.adb.execute(
+      ["shell", "uiautomator", "dump", "/sdcard/window_dump.xml"],
+      deviceId,
+    );
+    if (dumpResult.exitCode !== 0) {
+      return [];
+    }
+
+    const catResult = await this.adb.execute(
+      ["shell", "cat", "/sdcard/window_dump.xml"],
+      deviceId,
+    );
+    if (catResult.exitCode === 0 && catResult.stdout.includes("<node")) {
+      return this.parseUIHierarchy(catResult.stdout, options);
+    }
+
+    return [];
+  }
+
+  /**
+   * Try capturing UI elements via `dumpsys accessibility`.
+   * This uses the system's accessibility framework directly, which can
+   * see elements that UIAutomator misses (Flutter semantics nodes,
+   * custom views with accessibility annotations, WebView content).
+   *
+   * The output format uses semicolon-separated key-value pairs per node
+   * from AccessibilityNodeInfo.toString().
+   */
+  private async tryAccessibilityDump(deviceId: string, options?: UIElementOptions): Promise<UIElement[]> {
+    const result = await this.adb.execute(
+      ["shell", "dumpsys", "accessibility"],
+      deviceId,
+    );
+
+    if (result.exitCode !== 0 || !result.stdout) {
+      return [];
+    }
+
+    return this.parseAccessibilityDump(result.stdout, options);
+  }
+
+  /**
+   * Parse `dumpsys accessibility` output into UIElement[].
+   *
+   * AccessibilityNodeInfo.toString() produces lines like:
+   *   android.widget.Button@1a2b3c4; boundsInScreen: Rect(100, 200 - 300, 248);
+   *   packageName: com.example; className: android.widget.Button; text: Submit;
+   *   clickable: true; focusable: true; enabled: true; ...
+   *
+   * We extract nodes by matching boundsInScreen patterns, then pull out
+   * key-value pairs from the semicolon-delimited fields.
+   */
+  private parseAccessibilityDump(output: string, options?: UIElementOptions): UIElement[] {
+    const elements: UIElement[] = [];
+    let index = 0;
+
+    const lines = output.split("\n");
+
+    for (const line of lines) {
+      // Only process lines that contain screen bounds — these are node descriptions
+      const boundsMatch = line.match(
+        /boundsInScreen:\s*Rect\((\d+),\s*(\d+)\s*-\s*(\d+),\s*(\d+)\)/,
+      );
+      if (!boundsMatch) continue;
+
+      const left = parseInt(boundsMatch[1], 10);
+      const top = parseInt(boundsMatch[2], 10);
+      const right = parseInt(boundsMatch[3], 10);
+      const bottom = parseInt(boundsMatch[4], 10);
+
+      // Skip zero-area nodes
+      if (left >= right || top >= bottom) continue;
+
+      // Extract key-value fields from semicolon-separated format
+      const text = this.extractA11yField(line, "text");
+      const contentDescription = this.extractA11yField(line, "contentDescription");
+      const className = this.extractA11yField(line, "className")
+        || this.extractA11yClassName(line);
+      const packageName = this.extractA11yField(line, "packageName");
+      const resourceId = this.extractA11yField(line, "viewIdResName")
+        || this.extractA11yField(line, "resourceName");
+
+      const clickable = this.extractA11yBool(line, "clickable");
+      const focusable = this.extractA11yBool(line, "focusable");
+      const scrollable = this.extractA11yBool(line, "scrollable");
+      const enabled = this.extractA11yBoolDefault(line, "enabled", true);
+      const selected = this.extractA11yBool(line, "selected");
+      const checked = this.extractA11yBool(line, "checked");
+
+      // Apply interactive filter
+      if (options?.interactiveOnly && !clickable && !focusable && !scrollable) {
+        continue;
+      }
+
+      elements.push({
+        index: index++,
+        text,
+        contentDescription,
+        className,
+        packageName,
+        resourceId,
+        bounds: {
+          left,
+          top,
+          right,
+          bottom,
+          centerX: Math.round((left + right) / 2),
+          centerY: Math.round((top + bottom) / 2),
+        },
+        clickable,
+        scrollable,
+        focusable,
+        enabled,
+        selected,
+        checked,
+      });
+    }
+
+    return elements;
+  }
+
+  /**
+   * Extract a string field from an accessibility node line.
+   * Matches patterns like `fieldName: value;` or `fieldName: value\n`.
+   * Returns empty string if "null" or not found.
+   */
+  private extractA11yField(line: string, field: string): string {
+    const match = line.match(new RegExp(`${field}:\\s*([^;\\n]*)`));
+    if (!match) return "";
+    const value = match[1].trim();
+    return value === "null" ? "" : value;
+  }
+
+  /**
+   * Extract a boolean field from an accessibility node line.
+   * Matches `fieldName: true` or `fieldName: false`.
+   */
+  private extractA11yBool(line: string, field: string): boolean {
+    const match = line.match(new RegExp(`${field}:\\s*(true|false)`));
+    return match ? match[1] === "true" : false;
+  }
+
+  /**
+   * Extract a boolean with a default value if not found.
+   */
+  private extractA11yBoolDefault(line: string, field: string, defaultValue: boolean): boolean {
+    const match = line.match(new RegExp(`${field}:\\s*(true|false)`));
+    return match ? match[1] === "true" : defaultValue;
+  }
+
+  /**
+   * Extract class name from the beginning of an accessibility node line.
+   * Matches patterns like `android.widget.Button@1a2b3c4` at the start.
+   */
+  private extractA11yClassName(line: string): string {
+    const trimmed = line.trim();
+    const match = trimmed.match(/^([a-zA-Z][a-zA-Z0-9_.]+?)(?:@[\da-f]+|\(\d+\)|;)/);
+    return match ? match[1] : "";
+  }
+
+  // ----------------------------------------------------------
+  // XML parsing
+  // ----------------------------------------------------------
 
   /**
    * Parse uiautomator XML dump into an array of UIElement.

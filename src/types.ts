@@ -12,6 +12,8 @@ export interface DeviceInfo {
   sdkVersion: string;
   status: "device" | "offline" | "unauthorized" | "unknown";
   isEmulator: boolean;
+  platform?: "android" | "ios";
+  osVersion?: string;
   screenSize?: { width: number; height: number };
 }
 

@@ -12,6 +12,7 @@ import {
   type WidgetNode,
   type SourceLocation,
   type IsolateRef,
+  type EvalResult,
 } from "./vm-service.js";
 
 /** Pattern matching VM service URL in ADB logcat output. */
@@ -54,6 +55,10 @@ export class FlutterDriver {
   private client: VmServiceClient | null = null;
   private isolateId: string | null = null;
   private connection: FlutterConnection | null = null;
+  private cachedLibraryId: string | null = null;
+  private cachedDpr: number | null = null;
+  /** Set to true when evaluate() fails — avoids retrying on every call. */
+  private evaluateUnavailable: boolean = false;
 
   constructor(adbPath: string = "adb") {
     this.adb = new ADB(adbPath);
@@ -143,6 +148,9 @@ export class FlutterDriver {
     }
     this.isolateId = null;
     this.connection = null;
+    this.cachedLibraryId = null;
+    this.cachedDpr = null;
+    this.evaluateUnavailable = false;
   }
 
   // ================================================================
@@ -282,6 +290,170 @@ export class FlutterDriver {
     return entries;
   }
 
+  /**
+   * Get screen coordinates (physical pixels) for a widget using VM Service evaluate.
+   *
+   * Flow:
+   *   1. Select the widget via inspector API
+   *   2. Evaluate Dart code to get render object bounds via localToGlobal
+   *   3. Convert from logical to physical pixels using device pixel ratio
+   *
+   * Returns null if coordinates cannot be determined (graceful fallback).
+   */
+  async getWidgetBounds(
+    valueId: string,
+    deviceId: string,
+  ): Promise<{
+    left: number; top: number; right: number; bottom: number;
+    centerX: number; centerY: number;
+  } | null> {
+    this.assertConnected();
+
+    // Skip if evaluate is known to be unavailable (e.g., profile mode, DDS blocking)
+    if (this.evaluateUnavailable) return null;
+
+    try {
+      const isolateId = await this.ensureValidIsolate();
+
+      // Step 1: Select the widget in the inspector
+      await this.client!.callExtension(
+        "ext.flutter.inspector.setSelectionById",
+        isolateId,
+        { objectGroup: INSPECTOR_GROUP, arg: valueId },
+      );
+
+      // Step 2: Find a library with Flutter types in scope
+      const libraryId = await this.findFlutterLibraryId();
+      if (!libraryId) return null;
+
+      // Step 3: Evaluate expression to get bounds in logical pixels
+      // Uses IIFE pattern for multi-statement expression
+      const boundsExpr = `(() {
+  try {
+    final sel = WidgetInspectorService.instance.selection;
+    if (sel == null || sel.current == null) return 'null';
+    final ro = sel.current!.findRenderObject();
+    if (ro == null || ro is! RenderBox || !ro.hasSize) return 'null';
+    final pos = ro.localToGlobal(Offset.zero);
+    return '\${pos.dx},\${pos.dy},\${ro.size.width},\${ro.size.height}';
+  } catch (e) {
+    return 'error:\$e';
+  }
+})()`;
+
+      const result = await this.client!.evaluate(isolateId, libraryId, boundsExpr);
+
+      if (!result.valueAsString || result.valueAsString === 'null' || result.valueAsString.startsWith('error:')) {
+        return null;
+      }
+
+      const parts = result.valueAsString.split(',').map(Number);
+      if (parts.length !== 4 || parts.some(isNaN)) return null;
+
+      const [lx, ly, lw, lh] = parts;
+
+      // Step 4: Convert logical pixels to physical pixels
+      const dpr = await this.getDevicePixelRatio(deviceId);
+
+      const left = Math.round(lx * dpr);
+      const top = Math.round(ly * dpr);
+      const right = Math.round((lx + lw) * dpr);
+      const bottom = Math.round((ly + lh) * dpr);
+
+      return {
+        left,
+        top,
+        right,
+        bottom,
+        centerX: Math.round((left + right) / 2),
+        centerY: Math.round((top + bottom) / 2),
+      };
+    } catch (err) {
+      // Mark evaluate as unavailable to avoid retrying on every call
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('compilation') || msg.includes('No compilation service')) {
+        this.evaluateUnavailable = true;
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Combined widget search + coordinate resolution for smart_tap.
+   * Searches the widget tree locally, then resolves screen coordinates
+   * via VM service evaluate. Returns an ElementMatch-compatible result.
+   *
+   * This is the Flutter fast path: ~200ms total vs ~10s with AI vision.
+   */
+  async findWidgetForTap(
+    query: string,
+    deviceId: string,
+  ): Promise<{
+    found: boolean;
+    element?: {
+      description: string;
+      type: string;
+      text: string;
+      bounds: { left: number; top: number; right: number; bottom: number; centerX: number; centerY: number };
+      suggestedAction: string;
+      confidence: number;
+    };
+    confidence: number;
+  } | null> {
+    if (!this.isConnected) return null;
+
+    try {
+      // Step 1: Get widget tree (cached internally by VM service)
+      const tree = await this.getWidgetTree();
+
+      // Step 2: Search locally
+      const searchResult = this.findWidget(tree, query);
+      if (!searchResult.found || !searchResult.widget) return null;
+
+      const widget = searchResult.widget;
+      const valueId = widget.valueId || widget.objectId;
+      if (!valueId) return null;
+
+      // Step 3: Get screen coordinates
+      const bounds = await this.getWidgetBounds(valueId, deviceId);
+      if (!bounds) return null;
+
+      // Step 4: Build ElementMatch-compatible result
+      return {
+        found: true,
+        element: {
+          description: `Flutter widget: ${widget.widgetRuntimeType || widget.description}${widget.textPreview ? ` ("${widget.textPreview}")` : ''}`,
+          type: this.widgetTypeToElementType(widget.widgetRuntimeType || ''),
+          text: widget.textPreview || widget.description || '',
+          bounds,
+          suggestedAction: 'tap',
+          confidence: 0.95,
+        },
+        confidence: 0.95,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Map Flutter widget type to generic element type.
+   */
+  private widgetTypeToElementType(widgetType: string): string {
+    const t = widgetType.toLowerCase();
+    if (t.includes('button') || t.includes('inkwell') || t.includes('gesturedetector')) return 'button';
+    if (t.includes('textfield') || t.includes('textformfield') || t.includes('editabletext')) return 'text_field';
+    if (t.includes('checkbox')) return 'checkbox';
+    if (t.includes('switch')) return 'switch';
+    if (t.includes('image')) return 'image';
+    if (t.includes('icon')) return 'icon';
+    if (t.includes('text')) return 'text';
+    if (t.includes('tab')) return 'tab';
+    if (t.includes('listile') || t.includes('listtile')) return 'list_item';
+    if (t.includes('card')) return 'card';
+    return 'other';
+  }
+
   // ================================================================
   // Debug tools
   // ================================================================
@@ -373,6 +545,70 @@ export class FlutterDriver {
   }
 
   /**
+   * Trigger a hot reload on the connected Flutter app.
+   * Pushes code changes without losing app state.
+   */
+  async hotReload(): Promise<{ success: boolean; message: string }> {
+    this.assertConnected();
+    try {
+      const isolateId = await this.ensureValidIsolate();
+      const result = await this.client!.callExtension(
+        "ext.flutter.reassemble",
+        isolateId,
+      ) as { type?: string };
+      this.cachedLibraryId = null; // library IDs may change
+      return {
+        success: true,
+        message: result?.type === "Success" ? "Hot reload completed successfully." : "Hot reload triggered.",
+      };
+    } catch (err) {
+      return {
+        success: false,
+        message: `Hot reload failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  /**
+   * Trigger a hot restart on the connected Flutter app.
+   * Restarts the app from scratch (loses state) but applies all changes
+   * including static field initializers and global variable changes.
+   */
+  async hotRestart(): Promise<{ success: boolean; message: string }> {
+    this.assertConnected();
+    try {
+      const isolateId = await this.ensureValidIsolate();
+      const result = await this.client!.callExtension(
+        "ext.flutter.hotRestart",
+        isolateId,
+      ) as { type?: string };
+      // Reset caches since everything changes after restart
+      this.cachedLibraryId = null;
+      this.cachedDpr = null;
+      this.evaluateUnavailable = false;
+      // Re-discover isolate since hot restart creates a new one
+      try {
+        const { isolateId: newId } = await this.findFlutterIsolate();
+        this.isolateId = newId;
+        if (this.connection) {
+          this.connection.isolateId = newId;
+        }
+      } catch {
+        // Isolate re-discovery may fail briefly, that's ok
+      }
+      return {
+        success: true,
+        message: result?.type === "Success" ? "Hot restart completed successfully." : "Hot restart triggered.",
+      };
+    } catch (err) {
+      return {
+        success: false,
+        message: `Hot restart failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  /**
    * Check whether widget creation location tracking is enabled.
    */
   async isCreationTrackingEnabled(): Promise<boolean> {
@@ -423,6 +659,58 @@ export class FlutterDriver {
     }
 
     return this.isolateId!;
+  }
+
+  /**
+   * Get the device pixel ratio for coordinate conversion.
+   * Flutter uses logical pixels, ADB uses physical pixels.
+   * Cached because DPR doesn't change during a session.
+   */
+  async getDevicePixelRatio(deviceId: string): Promise<number> {
+    if (this.cachedDpr !== null) return this.cachedDpr;
+
+    const result = await this.adb.execute(["shell", "wm", "density"], deviceId);
+    const overrideMatch = result.stdout.match(/Override density:\s*(\d+)/);
+    const physicalMatch = result.stdout.match(/Physical density:\s*(\d+)/);
+    const dpi = parseInt((overrideMatch || physicalMatch)?.[1] || "420", 10);
+    this.cachedDpr = dpi / 160;
+    return this.cachedDpr;
+  }
+
+  /**
+   * Find a Flutter library ID in the isolate that has WidgetInspectorService in scope.
+   * Cached for the connection lifetime.
+   */
+  private async findFlutterLibraryId(): Promise<string | null> {
+    if (this.cachedLibraryId) return this.cachedLibraryId;
+
+    const isolate = await this.client!.getIsolate(this.isolateId!);
+    const libs = isolate.libraries as Array<{ uri?: string; id?: string }>;
+
+    // Prefer the widget_inspector library (has WidgetInspectorService)
+    const inspectorLib = libs.find(l =>
+      l.uri?.includes('widget_inspector') || l.uri?.includes('binding')
+    );
+    if (inspectorLib?.id) {
+      this.cachedLibraryId = inspectorLib.id;
+      return this.cachedLibraryId;
+    }
+
+    // Fallback: any flutter widgets library
+    const widgetsLib = libs.find(l => l.uri?.startsWith('package:flutter/src/widgets/'));
+    if (widgetsLib?.id) {
+      this.cachedLibraryId = widgetsLib.id;
+      return this.cachedLibraryId;
+    }
+
+    // Last resort: the app's main library (imports flutter/material.dart)
+    const appLib = libs.find(l => l.uri?.startsWith('package:') && !l.uri?.startsWith('package:flutter/'));
+    if (appLib?.id) {
+      this.cachedLibraryId = appLib.id;
+      return this.cachedLibraryId;
+    }
+
+    return null;
   }
 
   /**

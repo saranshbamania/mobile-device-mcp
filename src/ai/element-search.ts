@@ -32,29 +32,184 @@ for (const [word, digit] of Object.entries(WORD_TO_DIGIT)) {
   DIGIT_TO_WORD[digit] = word;
 }
 
-// Common UI label aliases — maps user-friendly terms to what Android actually uses
-const ALIASES: Record<string, string[]> = {
-  ac: ["clear", "clr", "all_clear"],
-  "all clear": ["clear", "clr", "ac"],
-  clear: ["clr", "ac", "all_clear"],
-  delete: ["del", "backspace"],
-  backspace: ["del", "delete"],
-  back: ["navigate_up", "back"],
-  close: ["dismiss", "close", "cancel"],
-  cancel: ["dismiss", "close", "cancel"],
-  ok: ["confirm", "accept", "done"],
-  confirm: ["ok", "accept", "done"],
-  search: ["search", "find", "query"],
-  settings: ["settings", "preferences", "gear"],
-  more: ["more_options", "overflow", "menu"],
-  share: ["share", "send"],
-  add: ["add", "plus", "new", "create"],
-  subtract: ["minus", "subtract"],
-  minus: ["subtract", "minus"],
-  divide: ["division", "divide"],
-  enter: ["return", "submit", "done"],
-  submit: ["enter", "return", "done"],
-};
+// ----------------------------------------------------------
+// Semantic Alias Map — Self-healing element search
+//
+// Each group is a set of synonyms. When a user says "tap Login"
+// but the button says "Sign In", the alias system resolves it
+// locally in <1ms without an AI call.
+//
+// Architecture: synonym groups are defined once, then expanded
+// into the bidirectional ALIASES map automatically. This avoids
+// the maintenance nightmare of manual bidirectional entries.
+//
+// False-positive notes (terms that appear in multiple groups):
+//   "close"  — navigation (close dialog) vs destructive (close account).
+//              Kept in navigation only; "close account" is multi-word and
+//              won't match the single-word alias.
+//   "send"   — communication (send message) vs share (send link).
+//              Kept in communication; share group uses "share" as anchor.
+//   "save"   — confirmation (save changes) vs social (save/bookmark post).
+//              Kept in confirmation only; social uses "bookmark"/"favorite".
+//   "update" — edit (update record) vs refresh (update feed).
+//              Kept in edit only; refresh uses "reload"/"sync".
+//   "new"    — add (new item) vs compose (new message).
+//              Kept in add only; compose group uses "compose"/"write".
+// ----------------------------------------------------------
+
+/**
+ * Synonym groups. Each array is a cluster of interchangeable terms.
+ * The buildAliases() function expands these into the flat bidirectional
+ * map that the scoring engine consumes.
+ */
+const SYNONYM_GROUPS: string[][] = [
+  // ---- Category 1: Authentication ----
+  ["login", "log_in", "log in", "signin", "sign_in", "sign in", "logon", "log_on", "log on", "signon", "sign_on", "sign on"],
+  ["signup", "sign_up", "sign up", "register", "create_account", "create account", "join", "get_started", "get started", "enroll", "enrol"],
+  ["logout", "log_out", "log out", "signout", "sign_out", "sign out", "logoff", "log_off", "log off"],
+  ["forgot_password", "forgot password", "reset_password", "reset password", "recover_password", "recover password", "forgot_pin", "forgot pin"],
+
+  // ---- Category 2: Navigation ----
+  ["back", "navigate_up", "go_back", "go back", "previous", "prev", "return", "arrow_back"],
+  ["close", "dismiss", "x", "close_button", "btn_close"],
+  ["cancel", "nevermind", "never_mind", "never mind", "not_now", "not now", "no_thanks", "no thanks", "skip"],
+  ["exit", "quit", "leave"],
+  ["forward", "next_page", "next page", "arrow_forward"],
+  ["home", "go_home", "go home", "main", "start"],
+
+  // ---- Category 3: Confirmation ----
+  ["submit", "confirm", "done", "apply", "save", "finish", "complete"],
+  ["ok", "okay", "got_it", "got it", "understood", "acknowledge", "ack"],
+  ["yes", "agree", "accept", "allow", "permit", "grant", "approve"],
+  ["continue", "proceed", "go", "next", "advance", "move_on", "move on"],
+  ["enter", "return"],
+
+  // ---- Category 4: Destructive ----
+  ["delete", "del", "remove", "trash", "discard", "erase"],
+  ["clear", "clr", "ac", "all_clear", "clear_all", "clear all", "reset"],
+  ["backspace", "bksp"],
+  ["undo", "revert", "rollback", "roll_back", "roll back"],
+
+  // ---- Category 5: Search / Filter ----
+  ["search", "find", "lookup", "look_up", "look up", "query"],
+  ["filter", "sort", "refine", "narrow"],
+  ["browse", "explore", "discover"],
+
+  // ---- Category 6: Settings / Config ----
+  ["settings", "preferences", "prefs", "options", "configuration", "config", "gear", "cog"],
+  ["account", "profile", "my_account", "my account", "my_profile", "my profile", "user"],
+
+  // ---- Category 7a: Menu / Overflow ----
+  ["menu", "hamburger", "nav_menu", "nav menu", "drawer", "sidebar", "side_menu", "side menu"],
+  ["more", "more_options", "more options", "overflow", "three_dots", "three dots", "dots", "ellipsis", "kebab"],
+
+  // ---- Category 7b: Share ----
+  ["share", "share_button", "forward", "send_to", "send to"],
+
+  // ---- Category 7c: Edit ----
+  ["edit", "modify", "change", "update", "revise", "amend", "pencil", "pen"],
+
+  // ---- Category 7d: Add / Create ----
+  ["add", "plus", "new", "create", "insert", "fab"],
+
+  // ---- Category 7e: Refresh ----
+  ["refresh", "reload", "sync", "synchronize", "pull_to_refresh", "pull to refresh"],
+
+  // ---- Category 8: Media Controls ----
+  ["play", "resume", "start_playback", "start playback"],
+  ["pause", "hold"],
+  ["stop", "end", "halt"],
+  ["mute", "silence", "sound_off", "sound off"],
+  ["unmute", "sound_on", "sound on", "unsilence"],
+  ["volume", "vol", "sound"],
+  ["volume_up", "volume up", "louder", "vol_up", "vol up"],
+  ["volume_down", "volume down", "quieter", "softer", "vol_down", "vol down"],
+  ["rewind", "rw", "skip_back", "skip back", "seek_back", "seek back"],
+  ["fast_forward", "fast forward", "ff", "skip_forward", "skip forward", "seek_forward", "seek forward"],
+  ["previous_track", "previous track", "prev_track", "prev track", "skip_previous", "skip previous"],
+  ["next_track", "next track", "skip_next", "skip next"],
+  ["shuffle", "random"],
+  ["repeat", "loop", "replay"],
+  ["fullscreen", "full_screen", "full screen", "maximize", "expand_video", "expand video"],
+
+  // ---- Category 9: Shopping / Commerce ----
+  ["cart", "bag", "basket", "shopping_cart", "shopping cart", "shopping_bag", "shopping bag"],
+  ["checkout", "check_out", "check out", "pay", "payment", "place_order", "place order"],
+  ["buy", "purchase", "order", "buy_now", "buy now"],
+  ["add_to_cart", "add to cart", "add_to_bag", "add to bag", "add_to_basket", "add to basket"],
+  ["wishlist", "wish_list", "wish list", "save_for_later", "save for later", "want"],
+  ["coupon", "promo", "promo_code", "promo code", "discount", "voucher", "discount_code", "discount code"],
+
+  // ---- Category 10: Communication ----
+  ["chat", "message", "msg", "im", "dm", "direct_message", "direct message", "conversation"],
+  ["send", "send_message", "send message", "deliver"],
+  ["reply", "respond", "answer"],
+  ["compose", "write", "draft", "new_message", "new message"],
+  ["comment", "remark", "note"],
+  ["attach", "attachment", "paperclip", "clip"],
+  ["call", "phone", "dial", "ring"],
+  ["video_call", "video call", "video_chat", "video chat", "facetime"],
+
+  // ---- Category 11a: Navigation Labels ----
+  ["dashboard", "overview", "summary"],
+  ["feed", "timeline", "stream", "wall"],
+  ["activity", "recent", "history"],
+  ["notifications", "alerts", "bell", "notif", "notifs"],
+
+  // ---- Category 11b: Social Actions ----
+  ["like", "love", "heart", "thumbs_up", "thumbs up", "upvote"],
+  ["dislike", "thumbs_down", "thumbs down", "downvote"],
+  ["favorite", "fav", "star", "bookmark", "pin", "save_post", "save post"],
+
+  // ---- Category 11c: Download / Upload ----
+  ["download", "install", "get", "fetch", "save_file", "save file"],
+  ["upload", "import", "attach_file", "attach file"],
+
+  // ---- Category 12a: Enable / Disable ----
+  ["enable", "activate", "turn_on", "turn on", "switch_on", "switch on", "on"],
+  ["disable", "deactivate", "turn_off", "turn off", "switch_off", "switch off", "off"],
+  ["toggle", "switch"],
+
+  // ---- Category 12b: Show / Hide ----
+  ["show", "reveal", "display", "visible", "unhide"],
+  ["hide", "conceal", "invisible", "hidden"],
+  ["expand", "open", "unfold", "show_more", "show more", "see_more", "see more", "read_more", "read more"],
+  ["collapse", "fold", "show_less", "show less", "see_less", "see less", "minimize"],
+
+  // ---- Calculator (original aliases, preserved) ----
+  ["subtract", "minus"],
+  ["divide", "division"],
+];
+
+/**
+ * Build the flat bidirectional alias map from synonym groups.
+ * For each group, every term maps to all OTHER terms in the group.
+ * Multi-word terms (e.g., "sign in") are included as keys so the
+ * multi-word lookup in parseQuery() resolves them.
+ */
+function buildAliases(groups: string[][]): Record<string, string[]> {
+  const map: Record<string, string[]> = {};
+  for (const group of groups) {
+    for (const term of group) {
+      const others = group.filter((t) => t !== term);
+      if (map[term]) {
+        // Term appears in multiple groups — merge without duplicates
+        const existing = new Set(map[term]);
+        for (const o of others) {
+          existing.add(o);
+        }
+        map[term] = [...existing];
+      } else {
+        map[term] = others;
+      }
+    }
+  }
+  return map;
+}
+
+// Common UI label aliases — maps user-friendly terms to what the UI actually shows.
+// Auto-generated from SYNONYM_GROUPS so every relationship is bidirectional.
+const ALIASES: Record<string, string[]> = buildAliases(SYNONYM_GROUPS);
 
 // Words that provide type hints but are not part of the search text
 const TYPE_HINT_WORDS = new Set([
@@ -160,10 +315,18 @@ function parseQuery(query: string): ParsedQuery {
     aliasVariants.push(...ALIASES[joined]);
   }
 
-  // If all words were fillers/hints, use the full raw query minus fillers
+  // If all words were fillers/hints, use the original words as tokens.
+  // This handles queries like "To" (a filler word that's also a UI label).
   if (searchTokens.length === 0) {
-    // Use type hints as search tokens as fallback
-    searchTokens.push(...typeHints);
+    if (typeHints.length > 0) {
+      searchTokens.push(...typeHints);
+    } else {
+      // All words were fillers — use them as-is since the user clearly
+      // means to search for that exact text (e.g., "To", "for")
+      for (const word of words) {
+        if (FILLER_WORDS.has(word)) searchTokens.push(word);
+      }
+    }
   }
 
   return { raw, searchTokens, typeHints, numericVariants, aliasVariants };
@@ -317,7 +480,7 @@ function scoreElement(el: UIElement, pq: ParsedQuery): ScoredElement {
           pq.searchTokens.length > 0 ? searchMatched / pq.searchTokens.length : 0,
           pq.aliasVariants.length > 0 ? aliasMatched / pq.aliasVariants.length : 0,
         );
-        const score = 0.7 * bestRatio;
+        const score = 0.75 * bestRatio;
         if (score > bestScore) {
           bestScore = score;
           bestReason = `Content description match: "${el.contentDescription}"`;
@@ -420,7 +583,32 @@ export function searchElementsLocally(
   const scored = flat
     .map((el) => scoreElement(el, pq))
     .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => {
+      // Primary: highest score wins
+      if (Math.abs(b.score - a.score) > 0.01) return b.score - a.score;
+
+      // Tiebreakers when scores are equal:
+      const aEl = a.element;
+      const bEl = b.element;
+
+      // 1. Prefer Button class over generic View
+      const aIsButton = aEl.className.toLowerCase().includes("button") ? 1 : 0;
+      const bIsButton = bEl.className.toLowerCase().includes("button") ? 1 : 0;
+      if (aIsButton !== bIsButton) return bIsButton - aIsButton;
+
+      // 2. Prefer clickable elements
+      const aClickable = aEl.clickable ? 1 : 0;
+      const bClickable = bEl.clickable ? 1 : 0;
+      if (aClickable !== bClickable) return bClickable - aClickable;
+
+      // 3. Prefer larger elements (more prominent on screen)
+      const aArea = (aEl.bounds.right - aEl.bounds.left) * (aEl.bounds.bottom - aEl.bounds.top);
+      const bArea = (bEl.bounds.right - bEl.bounds.left) * (bEl.bounds.bottom - bEl.bounds.top);
+      if (Math.abs(bArea - aArea) > 1000) return bArea - aArea;
+
+      // 4. Prefer elements lower on screen (primary actions are at bottom)
+      return bEl.bounds.centerY - aEl.bounds.centerY;
+    });
 
   if (scored.length === 0) {
     return { found: false, confidence: 0 };
@@ -447,7 +635,7 @@ export function searchElementsLocally(
     .map(toAnalyzed);
 
   return {
-    found: best.score > 0.7,
+    found: best.score >= 0.7,
     element: toAnalyzed(best),
     confidence: best.score,
     alternatives,
