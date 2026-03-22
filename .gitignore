@@ -24,3 +24,10 @@ test-flutter.ts
 test-metroping-e2e.ts
 test-full-demo.ts
 demo-output/
+
+# Companion app build artifacts
+companion-app/.gradle/
+companion-app/build/
+companion-app/app/build/
+companion-app/local.properties
+companion-app/gradle/wrapper/gradle-wrapper.jar

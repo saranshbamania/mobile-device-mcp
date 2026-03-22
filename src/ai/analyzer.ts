@@ -200,7 +200,8 @@ export class ScreenAnalyzer {
     screenshot?: { data: ScreenshotResult; timestamp: number };
     uiElements?: { data: UIElement[]; timestamp: number };
   } = {};
-  private cacheTTL: number = 3000; // 3 seconds
+  private cacheTTL: number = 5000; // 5 seconds — UI layout rarely changes after tap
+  private pendingPrefetch: Promise<void> | null = null;
 
   /** Track when getUIElements returns empty (Flutter apps) to avoid redundant calls. */
   private lastUIElementsEmpty: boolean = false;
@@ -222,11 +223,11 @@ export class ScreenAnalyzer {
     screenshotOptions?: ScreenshotOptions,
     private flutterDriver?: FlutterDriver,
   ) {
-    // Default: JPEG at quality 80, resize to 720px for AI — saves tokens
+    // Default: JPEG at quality 60, resize to 400px for AI — saves tokens
     this.screenshotOptions = screenshotOptions ?? {
       format: "jpeg",
-      quality: 80,
-      maxWidth: 720,
+      quality: 60,
+      maxWidth: 400,
     };
   }
 
@@ -271,26 +272,53 @@ export class ScreenAnalyzer {
     deviceId: string,
     query: string,
   ): Promise<ElementMatch> {
+    const t0 = Date.now();
     try {
       // --- Flutter fast path (Tier 0): widget tree search + coordinate resolution ---
-      // This bypasses AI entirely when Flutter is connected: ~200ms vs ~10s
       if (this.flutterDriver?.isConnected) {
         try {
           const flutterMatch = await this.flutterDriver.findWidgetForTap(query, deviceId);
           if (flutterMatch && flutterMatch.found && flutterMatch.confidence > 0.5) {
+            console.error(`[findElement] Tier 0 (flutter): "${query}" → conf=${flutterMatch.confidence.toFixed(2)} in ${Date.now() - t0}ms`);
             return flutterMatch as ElementMatch;
           }
         } catch {
-          // Flutter fast path failed — fall through to standard paths
+          // Flutter fast path failed — fall through
         }
       }
 
       // --- Fast path: local UI tree search (no AI call) ---
       if (this.config.analyzeWithUITree) {
-        const uiElements = await this.getUIElements(deviceId);
-        if (uiElements && uiElements.length > 0) {
-          const localMatch = searchElementsLocally(uiElements, query);
+        // Try stale cache first (any cached elements, interactive or full)
+        const staleElements = await this.getUIElements(deviceId, true);
+        if (staleElements && staleElements.length > 0) {
+          const localMatch = searchElementsLocally(staleElements, query);
+          if (localMatch.found && localMatch.confidence >= 0.7) {
+            console.error(`[findElement] Tier 1 (stale cache): "${query}" → conf=${localMatch.confidence.toFixed(2)} in ${Date.now() - t0}ms`);
+            return localMatch;
+          }
+        }
+
+        // Fresh UI tree — interactive-only first (faster, smaller payload)
+        const t1 = Date.now();
+        const interactiveElements = await this.getUIElements(deviceId, false, true);
+        const dumpMs = Date.now() - t1;
+        if (interactiveElements && interactiveElements.length > 0) {
+          const localMatch = searchElementsLocally(interactiveElements, query);
           if (localMatch.found && localMatch.confidence > 0.5) {
+            console.error(`[findElement] Tier 2a (fresh interactive): "${query}" → conf=${localMatch.confidence.toFixed(2)} in ${Date.now() - t0}ms (dump=${dumpMs}ms)`);
+            return localMatch;
+          }
+        }
+
+        // Full tree fallback if interactive-only didn't match
+        const t2 = Date.now();
+        const fullElements = await this.getUIElements(deviceId);
+        const dump2Ms = Date.now() - t2;
+        if (fullElements && fullElements.length > 0) {
+          const localMatch = searchElementsLocally(fullElements, query);
+          if (localMatch.found && localMatch.confidence > 0.5) {
+            console.error(`[findElement] Tier 2b (fresh full): "${query}" → conf=${localMatch.confidence.toFixed(2)} in ${Date.now() - t0}ms (dump=${dump2Ms}ms)`);
             return localMatch;
           }
         }
@@ -298,19 +326,23 @@ export class ScreenAnalyzer {
 
       // --- Slow path: AI-powered search ---
       this.assertClientAvailable();
+      const tAI = Date.now();
       const ctx = await this.captureContext(deviceId);
       const summarized = ctx.uiElements
         ? summarizeUIElements(ctx.uiElements)
         : undefined;
       const userPrompt = buildFindElementPrompt(query, summarized);
 
-      return await this.client.analyzeJSON<ElementMatch>({
+      const result = await this.client.analyzeJSON<ElementMatch>({
         systemPrompt: PROMPTS.FIND_ELEMENT,
         userPrompt,
         screenshot: ctx.screenshot?.base64,
         screenshotMimeType: ctx.screenshot ? `image/${ctx.screenshot.format}` : undefined,
       });
+      console.error(`[findElement] Tier 3 (AI vision): "${query}" → conf=${result.confidence?.toFixed(2) ?? "?"} in ${Date.now() - t0}ms (ai=${Date.now() - tAI}ms)`);
+      return result;
     } catch (error) {
+      console.error(`[findElement] FAILED: "${query}" in ${Date.now() - t0}ms — ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(
         `findElement failed for query "${query}": ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -465,16 +497,22 @@ export class ScreenAnalyzer {
     tapped: AnalyzedElement | null;
     message: string;
   }> {
+    const t0 = Date.now();
     try {
       const match = await this.findElement(deviceId, elementDescription);
+      const findMs = Date.now() - t0;
 
       if (match.found && match.element && match.confidence > 0.5) {
+        const tTap = Date.now();
         await this.driver.tap(
           deviceId,
           match.element.bounds.centerX,
           match.element.bounds.centerY,
         );
+        const tapMs = Date.now() - tTap;
         this.invalidateCache();
+        this.startPrefetch(deviceId);
+        console.error(`[smartTap] "${elementDescription}" → (${match.element.bounds.centerX},${match.element.bounds.centerY}) conf=${match.confidence.toFixed(2)} | find=${findMs}ms tap=${tapMs}ms total=${Date.now() - t0}ms`);
         return {
           success: true,
           tapped: match.element,
@@ -482,12 +520,14 @@ export class ScreenAnalyzer {
         };
       }
 
+      console.error(`[smartTap] "${elementDescription}" → NOT FOUND in ${Date.now() - t0}ms`);
       return {
         success: false,
         tapped: null,
         message: `Could not find element: ${elementDescription}`,
       };
     } catch (error) {
+      console.error(`[smartTap] "${elementDescription}" → FAILED in ${Date.now() - t0}ms`);
       throw new Error(
         `smartTap failed for "${elementDescription}": ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -524,6 +564,7 @@ export class ScreenAnalyzer {
         // Type the text.
         await this.driver.typeText(deviceId, text);
         this.invalidateCache();
+        this.startPrefetch(deviceId);
 
         return {
           success: true,
@@ -544,6 +585,335 @@ export class ScreenAnalyzer {
     }
   }
 
+  /**
+   * Detect and handle system dialogs / popups (permission requests,
+   * update prompts, system alerts). Can dismiss, accept, or auto-handle.
+   */
+  async handlePopup(
+    deviceId: string,
+    action: "dismiss" | "accept" | "auto" = "auto",
+  ): Promise<{
+    found: boolean;
+    popup_type?: string;
+    action_taken?: string;
+    message: string;
+  }> {
+    // Known system dialog packages
+    const SYSTEM_PACKAGES = new Set([
+      "com.android.systemui",
+      "com.android.permissioncontroller",
+      "com.google.android.permissioncontroller",
+      "com.google.android.packageinstaller",
+      "android",
+      "com.android.packageinstaller",
+      "com.android.documentsui",
+    ]);
+
+    const ACCEPT_TEXTS = new Set([
+      "allow", "while using the app", "only this time", "ok", "okay",
+      "accept", "yes", "got it", "continue", "agree", "permit", "grant",
+    ]);
+    const DISMISS_TEXTS = new Set([
+      "deny", "don't allow", "cancel", "later", "not now", "no thanks",
+      "dismiss", "close", "skip", "no", "decline", "never",
+    ]);
+
+    try {
+      const elements = await this.getUIElements(deviceId);
+      if (!elements || elements.length === 0) {
+        return { found: false, message: "No UI elements found on screen" };
+      }
+
+      // Flatten and find system dialog elements
+      const flat = this.flattenUIElements(elements);
+      const systemElements = flat.filter(el => SYSTEM_PACKAGES.has(el.packageName));
+
+      if (systemElements.length === 0) {
+        return { found: false, message: "No system dialog detected on screen" };
+      }
+
+      // Detect popup type
+      const popupType = systemElements.some(el =>
+        el.packageName.includes("permission")) ? "permission_dialog" : "system_dialog";
+
+      // Find clickable buttons
+      const buttons = systemElements.filter(el => el.clickable && (el.text || el.contentDescription));
+
+      if (buttons.length === 0) {
+        return { found: true, popup_type: popupType, message: "System dialog found but no clickable buttons detected" };
+      }
+
+      // Find the right button based on action preference
+      let targetButton: typeof buttons[0] | undefined;
+
+      for (const btn of buttons) {
+        const btnText = (btn.text || btn.contentDescription).toLowerCase().trim();
+        if (action === "accept" || action === "auto") {
+          if (ACCEPT_TEXTS.has(btnText)) {
+            targetButton = btn;
+            if (action === "accept") break;
+          }
+        }
+        if (action === "dismiss" || (action === "auto" && !targetButton)) {
+          if (DISMISS_TEXTS.has(btnText)) {
+            targetButton = btn;
+            if (action === "dismiss") break;
+          }
+        }
+      }
+
+      // Fallback: if auto mode found nothing specific, tap the first clickable button
+      if (!targetButton && action === "auto" && buttons.length > 0) {
+        targetButton = buttons[0];
+      }
+
+      if (!targetButton) {
+        return {
+          found: true,
+          popup_type: popupType,
+          message: `System dialog found but no matching ${action} button found`,
+        };
+      }
+
+      // Tap the button
+      await this.driver.tap(deviceId, targetButton.bounds.centerX, targetButton.bounds.centerY);
+      this.invalidateCache(true); // Full invalidate since dialog changes screen
+
+      return {
+        found: true,
+        popup_type: popupType,
+        action_taken: `Tapped "${targetButton.text || targetButton.contentDescription}"`,
+        message: `Dismissed ${popupType} by tapping "${targetButton.text || targetButton.contentDescription}"`,
+      };
+    } catch (error) {
+      return { found: false, message: `Error detecting popup: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+
+  /**
+   * Fill multiple form fields in a single operation. For each field,
+   * finds the matching input element, clears it, and types the new value.
+   */
+  async fillForm(
+    deviceId: string,
+    fields: Record<string, string>,
+  ): Promise<{
+    success: boolean;
+    filled: { field: string; success: boolean; message: string }[];
+    message: string;
+  }> {
+    const results: { field: string; success: boolean; message: string }[] = [];
+
+    try {
+      for (const [fieldName, value] of Object.entries(fields)) {
+        try {
+          // Find the field
+          const match = await this.findElement(deviceId, fieldName);
+
+          if (!match.found || !match.element || match.confidence <= 0.3) {
+            results.push({ field: fieldName, success: false, message: `Field not found: ${fieldName}` });
+            continue;
+          }
+
+          // Tap to focus
+          await this.driver.tap(deviceId, match.element.bounds.centerX, match.element.bounds.centerY);
+          await this.delay(300);
+
+          // Select all existing text (Ctrl+A equivalent: triple tap then select all)
+          await this.driver.longPress(deviceId, match.element.bounds.centerX, match.element.bounds.centerY, 500);
+          await this.delay(200);
+          // Try select all via key combo
+          await this.driver.pressKey(deviceId, "29"); // KEYCODE_A with meta
+          await this.delay(100);
+          // Delete selected text
+          await this.driver.pressKey(deviceId, "67"); // KEYCODE_DEL
+          await this.delay(200);
+
+          // Type new value
+          await this.driver.typeText(deviceId, value);
+          await this.delay(200);
+
+          results.push({ field: fieldName, success: true, message: `Filled "${fieldName}" with "${value}"` });
+
+          // Invalidate cache after each field since screen state changes
+          this.invalidateCache();
+        } catch (error) {
+          results.push({
+            field: fieldName,
+            success: false,
+            message: `Error filling ${fieldName}: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      }
+
+      const allSuccess = results.every(r => r.success);
+      return {
+        success: allSuccess,
+        filled: results,
+        message: allSuccess
+          ? `Successfully filled ${results.length} fields`
+          : `Filled ${results.filter(r => r.success).length}/${results.length} fields`,
+      };
+    } catch (error) {
+      throw new Error(`fillForm failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Element-specific wait
+  // ----------------------------------------------------------
+
+  /**
+   * Wait for a specific element to appear on screen.
+   * More reliable and faster than generic wait_for_settle — returns
+   * as soon as the target element is found instead of requiring
+   * two identical consecutive UI dumps.
+   */
+  async waitForElement(
+    deviceId: string,
+    query: string,
+    options: {
+      /** Max time to wait in ms (default: 5000) */
+      timeout?: number;
+      /** Interval between polls in ms (default: 300) */
+      pollInterval?: number;
+    } = {},
+  ): Promise<{
+    found: boolean;
+    element?: AnalyzedElement;
+    confidence?: number;
+    polls: number;
+    elapsed_ms: number;
+    message: string;
+  }> {
+    const timeout = options.timeout ?? 5000;
+    const pollInterval = options.pollInterval ?? 300;
+    const startTime = Date.now();
+    let polls = 0;
+
+    while (Date.now() - startTime < timeout) {
+      polls++;
+      // Force fresh dump (bypass cache)
+      this.cache.uiElements = undefined;
+      const elements = await this.getUIElements(deviceId);
+
+      if (elements && elements.length > 0) {
+        const match = searchElementsLocally(elements, query);
+        if (match.found && match.element && match.confidence > 0.5) {
+          const elapsed = Date.now() - startTime;
+          console.error(`[waitForElement] "${query}" found in ${elapsed}ms (${polls} polls), conf=${match.confidence.toFixed(2)}`);
+          return {
+            found: true,
+            element: match.element,
+            confidence: match.confidence,
+            polls,
+            elapsed_ms: elapsed,
+            message: `Element "${query}" found after ${polls} polls (${elapsed}ms)`,
+          };
+        }
+      }
+
+      // Wait before next poll
+      if (Date.now() - startTime + pollInterval < timeout) {
+        await this.delay(pollInterval);
+      } else {
+        break;
+      }
+    }
+
+    const elapsed = Date.now() - startTime;
+    console.error(`[waitForElement] "${query}" NOT found after ${elapsed}ms (${polls} polls)`);
+    return {
+      found: false,
+      polls,
+      elapsed_ms: elapsed,
+      message: `Element "${query}" not found within ${timeout}ms (${polls} polls)`,
+    };
+  }
+
+  // ----------------------------------------------------------
+  // Screen settle detection
+  // ----------------------------------------------------------
+
+  /**
+   * Wait for the screen to settle after a navigation or action.
+   * Polls the UI tree until two consecutive dumps are structurally identical,
+   * meaning the screen has stopped animating/loading.
+   *
+   * @param deviceId - Device ID
+   * @param options - Configuration for the settle detection
+   * @returns Info about whether the screen settled and how long it took
+   */
+  async waitForScreenSettle(
+    deviceId: string,
+    options: {
+      /** Max time to wait in ms (default: 3000) */
+      timeout?: number;
+      /** Interval between polls in ms (default: 500) */
+      pollInterval?: number;
+      /** Minimum wait before first poll in ms (default: 300) */
+      initialDelay?: number;
+    } = {},
+  ): Promise<{
+    settled: boolean;
+    polls: number;
+    elapsed_ms: number;
+    message: string;
+  }> {
+    const timeout = options.timeout ?? 3000;
+    const pollInterval = options.pollInterval ?? 500;
+    const initialDelay = options.initialDelay ?? 300;
+
+    const startTime = Date.now();
+
+    // Wait for initial animations to begin
+    await this.delay(initialDelay);
+
+    let previousHash = "";
+    let polls = 0;
+    const maxPolls = Math.ceil(timeout / pollInterval);
+
+    while (polls < maxPolls) {
+      polls++;
+
+      // Force fresh UI dump (bypass cache)
+      this.cache.uiElements = undefined;
+      const elements = await this.getUIElements(deviceId);
+
+      // Build a structural hash of the UI tree
+      const currentHash = this.hashUITree(elements);
+
+      if (previousHash && currentHash === previousHash) {
+        // Two consecutive identical dumps = screen settled
+        const elapsed = Date.now() - startTime;
+        // Update cache with the stable state
+        return {
+          settled: true,
+          polls,
+          elapsed_ms: elapsed,
+          message: `Screen settled after ${polls} polls (${elapsed}ms)`,
+        };
+      }
+
+      previousHash = currentHash;
+
+      // Check timeout
+      if (Date.now() - startTime >= timeout) {
+        break;
+      }
+
+      await this.delay(pollInterval);
+    }
+
+    const elapsed = Date.now() - startTime;
+    return {
+      settled: false,
+      polls,
+      elapsed_ms: elapsed,
+      message: `Screen did not settle within ${timeout}ms (${polls} polls)`,
+    };
+  }
+
   // ----------------------------------------------------------
   // Internal helpers
   // ----------------------------------------------------------
@@ -553,19 +923,29 @@ export class ScreenAnalyzer {
    * This is a lightweight call (no screenshot) used by the local
    * element search fast path.
    */
-  private async getUIElements(deviceId: string): Promise<UIElement[] | undefined> {
+  private async getUIElements(deviceId: string, allowStale: boolean = false, interactiveOnly: boolean = false): Promise<UIElement[] | undefined> {
+    // For full tree requests, check the cache
     if (
+      !interactiveOnly &&
       this.cache.uiElements &&
       this.isCacheValid(this.cache.uiElements.timestamp)
     ) {
       return this.cache.uiElements.data;
     }
 
+    // If stale cache exists and caller allows stale data, return it
+    if (allowStale && this.cache.uiElements) {
+      return this.cache.uiElements.data;
+    }
+
     try {
       const elements = await this.driver.getUIElements(deviceId, {
-        interactiveOnly: false,
+        interactiveOnly,
       });
-      this.cache.uiElements = { data: elements, timestamp: Date.now() };
+      // Only cache full tree results (interactive-only is a subset)
+      if (!interactiveOnly) {
+        this.cache.uiElements = { data: elements, timestamp: Date.now() };
+      }
       this.lastUIElementsEmpty = !elements || elements.length === 0;
       return elements;
     } catch {
@@ -579,6 +959,12 @@ export class ScreenAnalyzer {
    * Uses caching with TTL and parallel capture for performance.
    */
   private async captureContext(deviceId: string): Promise<CapturedContext> {
+    // Await any pending pre-fetch so its cached data is available
+    if (this.pendingPrefetch) {
+      await this.pendingPrefetch;
+      this.pendingPrefetch = null;
+    }
+
     const ctx: CapturedContext = {};
     const now = Date.now();
 
@@ -647,10 +1033,34 @@ export class ScreenAnalyzer {
    * rarely change after a tap, so keep the UI tree cache to avoid
    * expensive uiautomator dump calls on every interaction.
    */
-  private invalidateCache(): void {
+  private invalidateCache(fullInvalidate: boolean = false): void {
     this.cache.screenshot = undefined;
-    // Don't reset lastUIElementsEmpty here — if the tree was empty
-    // (Flutter app), it'll stay empty until we navigate to a different app.
+    if (fullInvalidate) {
+      this.cache.uiElements = undefined;
+      // Reset empty tracking on full invalidation (screen transitions,
+      // popup dismissals, navigation) — the new screen may have elements
+      // even if the previous one was empty (e.g., leaving a Flutter app).
+      this.lastUIElementsEmpty = false;
+    }
+  }
+
+  /**
+   * Pre-fetch screenshot + UI tree in the background after an action.
+   * The next findElement/captureContext call will use this pre-fetched data.
+   */
+  private startPrefetch(deviceId: string): void {
+    // Only prefetch if env var is set
+    if (!process.env.MCP_PREFETCH) return;
+
+    // Wait 400ms for animations to settle before capturing
+    this.pendingPrefetch = this.delay(400).then(async () => {
+      try {
+        await this.captureContext(deviceId);
+      } catch {
+        // Pre-fetch failure is non-fatal
+      }
+      this.pendingPrefetch = null;
+    });
   }
 
   /**
@@ -669,5 +1079,45 @@ export class ScreenAnalyzer {
    */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Create a structural hash of the UI tree for comparison.
+   * Compares element count, text content, and bounds positions.
+   * Excludes status bar elements (top 72px) to ignore clock changes.
+   */
+  private hashUITree(elements: UIElement[] | undefined): string {
+    if (!elements || elements.length === 0) return "empty";
+
+    const flat = this.flattenUIElements(elements);
+    // Exclude status bar elements (typically top 72px)
+    const appElements = flat.filter((el) => el.bounds.top >= 72);
+
+    // Build a string from semantic content only (no bounds).
+    // Flutter's accessibility bridge reports slightly different bounds
+    // between frames even on static screens, causing false mismatches.
+    const parts = appElements.map((el) => {
+      const text = el.text || "";
+      const desc = el.contentDescription || "";
+      return `${text}|${desc}|${el.className}|${el.clickable}`;
+    });
+
+    return parts.join(";;");
+  }
+
+  /**
+   * Flatten a nested UIElement tree into a flat array.
+   */
+  private flattenUIElements(elements: UIElement[]): UIElement[] {
+    const result: UIElement[] = [];
+    const stack = [...elements];
+    while (stack.length > 0) {
+      const el = stack.pop()!;
+      result.push(el);
+      if (el.children) {
+        stack.push(...el.children);
+      }
+    }
+    return result;
   }
 }

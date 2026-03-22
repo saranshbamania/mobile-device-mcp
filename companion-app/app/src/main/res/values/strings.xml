@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MCP Companion</string>
+    <string name="accessibility_service_description">
+        Provides real-time UI tree data to the mobile-device-mcp server
+        for AI-powered mobile automation and testing.
+        This service reads screen content to identify UI elements.
+        No data is collected or transmitted outside your local network.
+    </string>
+</resources>
