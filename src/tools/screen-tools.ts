@@ -26,13 +26,13 @@ export function registerScreenTools(
           .optional()
           .describe("Image format: 'png' (lossless, default) or 'jpeg' (compressed)"),
         quality: z
-          .number()
+          .coerce.number()
           .min(1)
           .max(100)
           .optional()
           .describe("JPEG quality 1-100 (default: 80). Only used when format is 'jpeg'"),
         max_width: z
-          .number()
+          .coerce.number()
           .min(100)
           .optional()
           .describe("Resize to this max width in pixels, maintaining aspect ratio. Reduces file size significantly"),
@@ -85,7 +85,7 @@ export function registerScreenTools(
       inputSchema: z.object({
         device_id: z.string().describe("Device serial ID"),
         interactive_only: z
-          .boolean()
+          .preprocess((v) => v === "true" || v === true, z.boolean())
           .optional()
           .default(true)
           .describe(

@@ -314,9 +314,9 @@ export function registerAITools(
         "Waits for the screen to stop changing after a navigation or action. Polls the UI tree until two consecutive snapshots are identical, indicating animations and loading have completed. Use this after tapping navigation buttons or triggering screen transitions to ensure the new screen is ready for interaction.",
       inputSchema: z.object({
         device_id: z.string().describe("Device serial ID"),
-        timeout: z.number().optional().default(3000)
+        timeout: z.coerce.number().optional().default(3000)
           .describe("Maximum time to wait in milliseconds (default: 3000)"),
-        poll_interval: z.number().optional().default(500)
+        poll_interval: z.coerce.number().optional().default(500)
           .describe("Time between polls in milliseconds (default: 500)"),
       }),
     },
@@ -347,9 +347,9 @@ export function registerAITools(
       inputSchema: z.object({
         device_id: z.string().describe("Device serial ID"),
         query: z.string().describe("Description of the element to wait for, e.g. 'Find Routes button' or 'search results'"),
-        timeout: z.number().optional().default(5000)
+        timeout: z.coerce.number().optional().default(5000)
           .describe("Maximum time to wait in milliseconds (default: 5000)"),
-        poll_interval: z.number().optional().default(300)
+        poll_interval: z.coerce.number().optional().default(300)
           .describe("Time between polls in milliseconds (default: 300)"),
       }),
     },

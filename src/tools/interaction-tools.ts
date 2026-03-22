@@ -101,8 +101,8 @@ export function registerInteractionTools(
         "Perform a single tap at the given (x, y) screen coordinates. Use get_ui_elements first to find the centerX/centerY of the element you want to tap.",
       inputSchema: z.object({
         device_id: z.string().describe("Device serial ID"),
-        x: z.number().describe("X coordinate in pixels"),
-        y: z.number().describe("Y coordinate in pixels"),
+        x: z.coerce.number().describe("X coordinate in pixels"),
+        y: z.coerce.number().describe("Y coordinate in pixels"),
       }),
     },
     async ({ device_id, x, y }) => {
@@ -141,8 +141,8 @@ export function registerInteractionTools(
         "Perform a double tap at the given (x, y) screen coordinates. Useful for zooming into maps/images or selecting text.",
       inputSchema: z.object({
         device_id: z.string().describe("Device serial ID"),
-        x: z.number().describe("X coordinate in pixels"),
-        y: z.number().describe("Y coordinate in pixels"),
+        x: z.coerce.number().describe("X coordinate in pixels"),
+        y: z.coerce.number().describe("Y coordinate in pixels"),
       }),
     },
     async ({ device_id, x, y }) => {
@@ -181,8 +181,8 @@ export function registerInteractionTools(
         "Perform a long press (touch and hold) at the given (x, y) screen coordinates. Commonly used to open context menus, start drag operations, or trigger secondary actions.",
       inputSchema: z.object({
         device_id: z.string().describe("Device serial ID"),
-        x: z.number().describe("X coordinate in pixels"),
-        y: z.number().describe("Y coordinate in pixels"),
+        x: z.coerce.number().describe("X coordinate in pixels"),
+        y: z.coerce.number().describe("Y coordinate in pixels"),
         duration: z
           .number()
           .optional()
@@ -226,10 +226,10 @@ export function registerInteractionTools(
         "Perform a swipe gesture from (start_x, start_y) to (end_x, end_y). Use this to scroll through lists, dismiss notifications, navigate between pages, or pull down the notification shade. A shorter duration makes the swipe faster (flick), while a longer duration makes it slower (drag).",
       inputSchema: z.object({
         device_id: z.string().describe("Device serial ID"),
-        start_x: z.number().describe("Starting X coordinate in pixels"),
-        start_y: z.number().describe("Starting Y coordinate in pixels"),
-        end_x: z.number().describe("Ending X coordinate in pixels"),
-        end_y: z.number().describe("Ending Y coordinate in pixels"),
+        start_x: z.coerce.number().describe("Starting X coordinate in pixels"),
+        start_y: z.coerce.number().describe("Starting Y coordinate in pixels"),
+        end_x: z.coerce.number().describe("Ending X coordinate in pixels"),
+        end_y: z.coerce.number().describe("Ending Y coordinate in pixels"),
         duration: z
           .number()
           .optional()

@@ -22,7 +22,7 @@ export function registerLogTools(
       inputSchema: z.object({
         device_id: z.string().describe("Device serial ID"),
         lines: z
-          .number()
+          .coerce.number()
           .optional()
           .default(50)
           .describe("Number of recent log lines to retrieve"),

@@ -22,7 +22,7 @@ export function registerAppTools(
       inputSchema: z.object({
         device_id: z.string().describe("Device serial ID"),
         include_system: z
-          .boolean()
+          .preprocess((v) => v === "true" || v === true, z.boolean())
           .optional()
           .default(false)
           .describe("Include system apps in the listing"),

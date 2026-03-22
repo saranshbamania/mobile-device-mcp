@@ -298,8 +298,8 @@ export function registerFlutterTools(
         "Returns the widget rendered in isolation as a PNG image.",
       inputSchema: z.object({
         value_id: z.string().describe("The valueId of the widget to screenshot"),
-        width: z.number().optional().default(300).describe("Screenshot width in pixels"),
-        height: z.number().optional().default(600).describe("Screenshot height in pixels"),
+        width: z.coerce.number().optional().default(300).describe("Screenshot width in pixels"),
+        height: z.coerce.number().optional().default(600).describe("Screenshot height in pixels"),
       }),
     },
     async ({ value_id, width, height }) => {
@@ -411,7 +411,7 @@ export function registerFlutterTools(
         "Toggle the debug paint overlay on the Flutter app. Shows widget boundaries, " +
         "padding, alignment guides, and construction lines. Useful for debugging layout issues.",
       inputSchema: z.object({
-        enabled: z.boolean().describe("Enable (true) or disable (false) debug paint"),
+        enabled: z.preprocess((v) => v === "true" || v === true, z.boolean()).describe("Enable (true) or disable (false) debug paint"),
       }),
     },
     async ({ enabled }) => {
