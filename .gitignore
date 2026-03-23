@@ -7,6 +7,7 @@ LAUNCH-PLAYBOOK.md
 .mcp.json
 benchmark-*.mjs
 debug-*.mjs
+generate-key.mjs
 bug-screenshots/
 smart-test*.mjs
 smart-final*.mjs
