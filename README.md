@@ -9,6 +9,24 @@ MCP server that gives AI coding assistants (Claude Code, Cursor, Windsurf) the a
 
 > AI assistants can read your code but can't see your phone. This fixes that.
 
+## Why This One?
+
+| Feature | mobile-device-mcp | mobile-next/mobile-mcp | appium/appium-mcp |
+|---------|:-:|:-:|:-:|
+| Total tools | **49** | 20 | ~15 |
+| Setup | `npx` (30 sec) | `npx` | Requires Appium server |
+| AI visual analysis | **12 tools** (Claude + Gemini) | None | Vision-based finding |
+| Flutter widget tree | **10 tools** (Dart VM Service) | None | None |
+| Smart element finding | **4-tier** (<1ms local search) | Accessibility tree only | XPath/selectors |
+| Companion app (23x faster UI tree) | Yes | No | No |
+| Video recording | Yes | No | No |
+| Test script generation | **TS, Python, JSON** | No | Java/TestNG only |
+| iOS simulator support | Yes | Yes | Yes |
+| iOS real device | Planned | Yes | Yes |
+| Screenshot compression | **89%** (251KB->28KB) | None | 50-80% |
+| Multi-provider AI | Claude + Gemini | N/A | Single provider |
+| Price | Free tier + Pro | Free | Free |
+
 ## The Problem
 
 Web developers have browser DevTools, Playwright, and Puppeteer -- AI assistants can click around, take screenshots, and verify fixes. Mobile developers? They're stuck manually screenshotting, copying logs, and describing what's on screen. They're **human middleware** between the AI and the device.
