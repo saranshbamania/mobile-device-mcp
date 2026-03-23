@@ -21,6 +21,8 @@ import type { ScreenAnalyzer } from "../ai/analyzer.js";
 import type { FlutterDriver } from "../drivers/flutter/index.js";
 import type { ActionRecorder } from "../recording/recorder.js";
 import type { IOSSimulatorDriver } from "../drivers/ios/index.js";
+import { FREE_TOOLS, PRO_UPGRADE_MESSAGE } from "../license.js";
+import type { LicenseInfo } from "../license.js";
 
 export {
   registerDeviceTools,
@@ -40,6 +42,40 @@ const RECORDING_TOOLS = new Set([
   "stop_test_recording",
   "get_recorded_actions",
 ]);
+
+/**
+ * Create a proxy that intercepts registerTool calls for pro tools.
+ * If the user is on the free tier, pro tools are still registered
+ * (so they appear in the tool list) but return an upgrade message.
+ */
+function createLicenseProxy(server: McpServer): McpServer {
+  const originalRegisterTool = server.registerTool.bind(server);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (server as any).registerTool = (name: string, config: any, cb: (...args: any[]) => any) => {
+    if (FREE_TOOLS.has(name)) {
+      return originalRegisterTool(name, config, cb as any);
+    }
+
+    // Pro tool on free tier: register it with [PRO] tag but gate the handler
+    const proConfig = {
+      ...config,
+      title: config.title ? `${config.title} [Pro]` : undefined,
+      description: config.description
+        ? `[Pro] ${config.description}`
+        : undefined,
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const gatedCb = async (..._args: any[]) => {
+      return PRO_UPGRADE_MESSAGE;
+    };
+
+    return originalRegisterTool(name, proConfig, gatedCb as any);
+  };
+
+  return server;
+}
 
 /**
  * Create a proxy around McpServer that intercepts registerTool calls
@@ -97,9 +133,15 @@ export function registerAllTools(
   getAndroidDriver?: () => AndroidDriver,
   getRecorder?: () => ActionRecorder,
   getIOSDriver?: () => IOSSimulatorDriver | null,
+  license?: LicenseInfo,
 ): void {
-  // Wrap server with recording proxy if recorder is available
-  const registrationServer = getRecorder ? createRecordingProxy(server, getRecorder) : server;
+  // Wrap server with license gating proxy if on free tier
+  let registrationServer = license && license.tier === "free"
+    ? createLicenseProxy(server)
+    : server;
+
+  // Wrap with recording proxy if recorder is available
+  registrationServer = getRecorder ? createRecordingProxy(registrationServer, getRecorder) : registrationServer;
 
   registerDeviceTools(registrationServer, getDriver);
   registerScreenTools(registrationServer, getDriver);

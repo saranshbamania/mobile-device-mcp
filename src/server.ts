@@ -12,9 +12,10 @@ import { registerAllTools } from "./tools/index.js";
 import { AIClient } from "./ai/client.js";
 import { ScreenAnalyzer } from "./ai/analyzer.js";
 import { ActionRecorder } from "./recording/recorder.js";
+import { validateLicense, logLicenseStatus } from "./license.js";
 
 /** Server version — matches package.json */
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.2.1";
 
 /**
  * Create a configured MCP server ready to start.
@@ -53,7 +54,11 @@ export function createServer(config: ServerConfig): {
 
   const recorder = new ActionRecorder();
 
-  registerAllTools(server, () => driver, () => analyzer, () => flutterDriver, () => driver, () => recorder, () => iosDriver);
+  // Validate license and gate pro tools
+  const license = validateLicense();
+  logLicenseStatus(license);
+
+  registerAllTools(server, () => driver, () => analyzer, () => flutterDriver, () => driver, () => recorder, () => iosDriver, license);
 
   async function start(): Promise<void> {
     const transport = new StdioServerTransport();
