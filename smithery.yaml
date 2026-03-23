@@ -1,0 +1,33 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      googleApiKey:
+        type: string
+        title: Google API Key
+        description: "Required for AI visual analysis tools. Get a free key at aistudio.google.com/apikey"
+      licenseKey:
+        type: string
+        title: Pro License Key (optional)
+        description: "Unlock all 49 tools including AI vision, Flutter inspection, video recording, and test generation. Get Pro at rzp.io/rzp/r4ijQsJY"
+      adbPath:
+        type: string
+        title: ADB Path (optional)
+        description: "Custom path to ADB binary. Auto-detected from PATH if not set."
+      defaultDevice:
+        type: string
+        title: Default Device Serial (optional)
+        description: "Device serial number to use. Auto-detected if only one device is connected."
+    required: []
+  commandFunction: |-
+    (config) => ({
+      command: "npx",
+      args: ["-y", "mobile-device-mcp"],
+      env: {
+        ...(config.googleApiKey ? { GOOGLE_API_KEY: config.googleApiKey } : {}),
+        ...(config.licenseKey ? { MOBILE_MCP_LICENSE_KEY: config.licenseKey } : {}),
+        ...(config.adbPath ? { MCP_ADB_PATH: config.adbPath } : {}),
+        ...(config.defaultDevice ? { MCP_DEFAULT_DEVICE: config.defaultDevice } : {}),
+      }
+    })
