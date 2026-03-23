@@ -31,7 +31,7 @@ MCP server that gives AI coding assistants (Claude Code, Cursor, Windsurf) the a
 | iOS real device | Planned | Yes | Yes |
 | Screenshot compression | **89%** (251KB->28KB) | None | 50-80% |
 | Multi-provider AI | Claude + Gemini | N/A | Single provider |
-| Price | Free tier + Pro | Free | Free |
+| Price | Free + Pro (₹499/mo) | Free | Free |
 
 ## The Problem
 
@@ -141,9 +141,9 @@ Copy `.mcp.json` into any mobile project -- Flutter, React Native, Kotlin, Swift
 | `get_current_app` | Get the foreground app |
 | `get_logs` | Get logcat entries with filtering |
 
-### Pro (35 additional tools) -- [$6/mo](https://rzp.io/rzp/r4ijQsJY)
+### Pro (35 additional tools) -- [₹499/mo](https://rzp.io/rzp/r4ijQsJY)
 
-**[Get Pro License](https://rzp.io/rzp/r4ijQsJY)** -- unlock all 49 tools. After payment, you'll receive a license key. Add it to your `.mcp.json`:
+**[Get Pro License](https://rzp.io/rzp/r4ijQsJY)** -- unlock all 49 tools. After payment, you'll receive your license key via email within 1 hour. Add it to your `.mcp.json`:
 
 ```json
 {
