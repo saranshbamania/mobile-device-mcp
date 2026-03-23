@@ -52,10 +52,18 @@ Without this tool:                    With this tool:
 
 ## Quick Start
 
+### Install
+
+```bash
+npx mobile-device-mcp
+```
+
+No global install needed. Runs directly via npx.
+
 ### Prerequisites
 - Node.js 18+
 - Android device/emulator connected via ADB
-- ADB installed (Android SDK Platform Tools)
+- ADB installed ([Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools))
 
 ### Setup (One-time, 30 seconds)
 
