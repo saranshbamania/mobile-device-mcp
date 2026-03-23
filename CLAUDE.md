@@ -15,7 +15,7 @@ A commercial MCP server product (`mobile-device-mcp`) that gives AI coding assis
 - **Phase 2: AI Visual Analysis Layer** — 8 AI-powered MCP tools, multi-provider support (Anthropic Claude + Google Gemini), all 9/9 tests passed on real device
 - **Performance Optimization** — 3-tier element search (local → cached AI → fresh AI), TTL-based caching, parallel capture, alias mapping. Result: smart_tap 37x faster (7.6s → 205ms), find_element 7000x faster (7.1s → 1ms)
 - **Screenshot Compression Pipeline** — Pure-JS JPEG encoding + bilinear resize (pngjs + jpeg-js). AI tools auto-compress to JPEG q=60, 400w. Result: ~28KB average screenshots (down from 251KB), zero AI quality loss.
-- **Phase 3: Flutter Widget Tree** — 8 Flutter-specific MCP tools via Dart VM Service Protocol. Connects to running debug/profile apps, inspects widget tree, maps 93 widgets to source code file:line. Handles DDS redirect. 12/12 tests passed on real device (metroping app on Pixel 8).
+- **Phase 3: Flutter Widget Tree** — 8 Flutter-specific MCP tools via Dart VM Service Protocol. Connects to running debug/profile apps, inspects widget tree, maps 93 widgets to source code file:line. Handles DDS redirect. 12/12 tests passed on real device.
 - **Companion Android App** — AccessibilityService-based companion app that provides real-time UI tree via TCP socket (JSON-RPC on 127.0.0.1:18080). 23x faster than UIAutomator dump (105ms vs 2448ms). Built, installed, and tested on Pixel 8. Source in `companion-app/`.
 - **Performance Fixes (2026-03-21)** — 6 targeted fixes based on live E2E testing:
   1. Stale cache threshold lowered 0.85→0.7 (eliminates redundant ADB dumps)
@@ -26,7 +26,7 @@ A commercial MCP server product (`mobile-device-mcp`) that gives AI coding assis
   6. Interactive-only search first, full tree fallback (30-40% faster dumps)
 - **GitHub repo**: https://github.com/saranshbamania/mobile-device-mcp
 - **npm published**: v0.1.0 — `npx mobile-device-mcp`
-- **Live tested** with Google Gemini 2.5 Flash on Pixel 8. Full E2E test on MetroPing: 14/14 smart_taps passed, 0 AI calls needed.
+- **Live tested** with Google Gemini 2.5 Flash on Pixel 8. Full E2E test: 14/14 smart_taps passed, 0 AI calls needed.
 - **Flutter Hot Reload/Restart** — 2 new tools (`flutter_hot_reload`, `flutter_hot_restart`) via Dart VM Service extensions. Hot reload preserves state, hot restart re-discovers isolate automatically.
 - **iOS Simulator Support** — `IOSSimulatorDriver` implementing full `DeviceDriver` interface via `xcrun simctl`. 4 iOS-specific tools + shared device tools. macOS only, auto-detected.
 - **Video Recording** — 2 tools (`record_screen`, `stop_recording`) using `adb shell screenrecord`. Long-running process via `ADB.spawn()`, one recording per device, auto-cleanup.

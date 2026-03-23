@@ -298,28 +298,18 @@ companion-app/            # Android companion app (Kotlin)
 
 ## Roadmap
 
-- [x] Phase 1: Android ADB device control (18 tools)
-- [x] Phase 2: AI visual analysis layer (12 tools)
-- [x] Phase 3: Flutter widget tree integration (10 tools)
-- [x] iOS simulator support (4 tools)
-- [x] Video recording (2 tools)
-- [x] Test generation (3 tools)
-- [x] Companion app for 23x faster UI tree
-- [x] Multi-provider AI (Anthropic Claude + Google Gemini)
-- [x] Performance optimization (4-tier search, caching, parallel capture)
-- [x] Screenshot compression pipeline (JPEG q=60, 400w, ~28KB avg)
-- [x] npm publish (`npx mobile-device-mcp`)
-- [x] License gating (Free / Pro tiers)
-- [ ] iOS physical device support (idevice/pymobiledevice3)
+- [ ] iOS physical device support
 - [ ] Multi-device orchestration
 - [ ] CI/CD integration
+- [ ] Cloud device farm support
 
 ## Tested On
 
-- Pixel 8, Android 16, SDK 36
-- Flutter 3.41.3 (debug mode)
-- Google Gemini 2.5 Flash
-- Windows 11 + wireless ADB
+- **Devices**: Pixel 8 (Android 16), Samsung Galaxy series, Android emulators
+- **Apps**: Telegram, Instagram, Spotify, WhatsApp, YouTube, Chrome, Settings, and Flutter apps
+- **AI Providers**: Google Gemini 2.5 Flash, Anthropic Claude
+- **Platforms**: Windows 11, macOS (iOS simulators)
+- **Connection**: USB and wireless ADB
 
 ## License
 

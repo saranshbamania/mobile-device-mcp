@@ -1,8 +1,8 @@
-# End-to-End Test Log: MetroPing on Pixel 8
+# End-to-End Test Log: Flutter App on Pixel 8
 **Date:** 2026-03-20, 11:03 PM - 11:07 PM IST
 **Device:** Google Pixel 8, Android 16 (SDK 36)
-**App:** MetroPing (com.metroping.metroping) — Delhi Metro route planner (Flutter)
-**MCP Server:** mobile-device-mcp @ perf/flutter-optimization branch
+**App:** Flutter sample app (debug mode)
+**MCP Server:** mobile-device-mcp
 **Screenshot Settings:** JPEG q=60, maxWidth=400px
 
 ---
