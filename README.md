@@ -1,9 +1,15 @@
-# mobile-device-mcp
+<p align="center">
+  <img src="assets/icon.png" alt="mobile-device-mcp" width="128" height="128" />
+</p>
 
-[![npm version](https://img.shields.io/npm/v/mobile-device-mcp)](https://www.npmjs.com/package/mobile-device-mcp)
-[![npm downloads](https://img.shields.io/npm/dm/mobile-device-mcp)](https://www.npmjs.com/package/mobile-device-mcp)
-[![GitHub stars](https://img.shields.io/github/stars/saranshbamania/mobile-device-mcp)](https://github.com/saranshbamania/mobile-device-mcp)
-[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
+<h1 align="center">mobile-device-mcp</h1>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/mobile-device-mcp"><img src="https://img.shields.io/npm/v/mobile-device-mcp" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/mobile-device-mcp"><img src="https://img.shields.io/npm/dm/mobile-device-mcp" alt="npm downloads" /></a>
+  <a href="https://github.com/saranshbamania/mobile-device-mcp"><img src="https://img.shields.io/github/stars/saranshbamania/mobile-device-mcp" alt="GitHub stars" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-blue.svg" alt="License: BSL 1.1" /></a>
+</p>
 
 MCP server that gives AI coding assistants (Claude Code, Cursor, Windsurf) the ability to **see and interact with mobile devices**. 49 tools for screenshots, UI inspection, touch interaction, AI-powered visual analysis, Flutter widget tree inspection, video recording, and test generation.
 
