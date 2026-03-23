@@ -44,7 +44,7 @@ export const PRO_UPGRADE_MESSAGE = {
         "",
         "Pro includes: AI vision, Flutter inspection, iOS simulator, video recording, test generation, and more.",
         "",
-        "Get Pro: https://rzp.io/rzp/fCvY9mNK",
+        "Get Pro: https://rzp.io/rzp/r4ijQsJY",
         "",
         "After payment, you'll receive a license key. Add it to your .mcp.json:",
         '  "MOBILE_MCP_LICENSE_KEY": "your-key-here"',
