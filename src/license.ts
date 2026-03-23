@@ -40,11 +40,13 @@ export const PRO_UPGRADE_MESSAGE = {
     {
       type: "text" as const,
       text: [
-        "This is a Pro feature. Upgrade to unlock all 49 tools including AI vision, Flutter inspection, test generation, and more.",
+        "This is a Pro feature. Upgrade to Pro to unlock all 49 tools.",
         "",
-        "Get your license key at: https://github.com/saranshbamania/mobile-device-mcp#pro",
+        "Pro includes: AI vision, Flutter inspection, iOS simulator, video recording, test generation, and more.",
         "",
-        "Then add to your .mcp.json:",
+        "Get Pro: https://rzp.io/rzp/fCvY9mNK",
+        "",
+        "After payment, you'll receive a license key. Add it to your .mcp.json:",
         '  "MOBILE_MCP_LICENSE_KEY": "your-key-here"',
       ].join("\n"),
     },
