@@ -63,6 +63,7 @@ Without this tool:                    With this tool:
 
 2. **Add `.mcp.json` to your project root:**
 
+**macOS / Linux:**
 ```json
 {
   "mcpServers": {
@@ -77,6 +78,64 @@ Without this tool:                    With this tool:
   }
 }
 ```
+
+**Windows:**
+```json
+{
+  "mcpServers": {
+    "mobile-device": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "mobile-device-mcp"],
+      "env": {
+        "GOOGLE_API_KEY": "your-google-api-key"
+      }
+    }
+  }
+}
+```
+
+**With Pro license key** (after [purchasing Pro](https://rzp.io/rzp/r4ijQsJY)):
+
+<details>
+<summary>macOS / Linux (Pro)</summary>
+
+```json
+{
+  "mcpServers": {
+    "mobile-device": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "mobile-device-mcp"],
+      "env": {
+        "GOOGLE_API_KEY": "your-google-api-key",
+        "MOBILE_MCP_LICENSE_KEY": "MDMCP-XXXXX-XXXXX-XXXXX-XXXXX"
+      }
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary>Windows (Pro)</summary>
+
+```json
+{
+  "mcpServers": {
+    "mobile-device": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "mobile-device-mcp"],
+      "env": {
+        "GOOGLE_API_KEY": "your-google-api-key",
+        "MOBILE_MCP_LICENSE_KEY": "MDMCP-XXXXX-XXXXX-XXXXX-XXXXX"
+      }
+    }
+  }
+}
+```
+</details>
 
 3. **Open your AI coding assistant** from that directory. That's it.
 

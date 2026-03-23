@@ -1,6 +1,6 @@
 {
   "name": "mobile-device-mcp",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "MCP server that gives AI coding assistants (Claude, Cursor, Windsurf) the ability to see and interact with Android mobile devices via ADB — AI-powered visual inspection, element finding, and device automation",
   "type": "module",
   "main": "dist/index.js",
