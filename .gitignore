@@ -5,6 +5,8 @@ dist/
 .env.local
 LAUNCH-PLAYBOOK.md
 .mcp.json
+benchmark-*.mjs
+debug-*.mjs
 bug-screenshots/
 smart-test*.mjs
 smart-final*.mjs

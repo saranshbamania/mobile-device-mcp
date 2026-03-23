@@ -37,15 +37,15 @@ A commercial MCP server product (`mobile-device-mcp`) that gives AI coding assis
 
 ### Not Yet Done
 - **Phase 4: iOS Support** — Simulators done (xcrun simctl, `IOSSimulatorDriver`). Physical devices still needed (idevice/pymobiledevice3). UI tree dump not yet implemented (needs XCTest or Accessibility Inspector integration). Apple frequently breaks device protocols — high maintenance.
-- **Phase 5: Monetization** — License keys (Keygen.sh), usage analytics, free/paid tiers.
+- **Phase 5: Monetization** — License key gating implemented (BSL 1.1). Payment integration pending.
 
 ## Architecture Decisions
 
 | Decision | Choice | Why |
 |----------|--------|-----|
-| Language | TypeScript / Node.js | npm distribution via `npx`, MCP SDK is TS-first, largest buyer market |
-| Build approach | From scratch (Option D) | Full IP ownership, no upstream dependencies, free/paid boundary designed in |
-| AI providers | Multi-provider (Anthropic + Google) | Don't lock customers to one provider, wider market reach |
+| Language | TypeScript / Node.js | npm distribution via `npx`, MCP SDK is TS-first |
+| Build approach | From scratch | Full IP ownership, no upstream dependencies |
+| AI providers | Multi-provider (Anthropic + Google) | Don't lock users to one provider |
 | Default AI model | Gemini 2.5 Flash | Cheapest vision model (~$0.15/1M input tokens), good quality, free tier available |
 | Screenshot format | Base64 inline | AI models consume images inline. File paths break in remote/cloud setups |
 | UI tree format | Structured JSON (pruned from XML) | Raw XML is 50-200KB of noise. Parsed JSON saves tokens and money |
@@ -94,13 +94,11 @@ Cache invalidation after tap/type: only clears screenshot, keeps UI tree (button
 - Strategy 2: UIAutomator retry after 500ms (handles transient failures)
 - Strategy 3: Accessibility dump fallback (parses `dumpsys accessibility`)
 
-## Known Risks
+## Known Limitations
 
-1. **Token bloat**: Base64 screenshots + JSON on every call. Mitigate with vision/tree mode toggle, image compression, thumbnail option.
-2. **Flutter debug-only**: Dart VM Service Protocol stripped from Release builds. QA/enterprise features must use ADB accessibility tree.
-3. **iOS maintenance**: Apple breaks idevice protocols with iOS updates. Ship Android first, iOS simulators before physical devices.
-4. **Local license cracking**: MCP servers run locally, npm packages are crackable. Focus revenue on B2B/enterprise, accept some piracy on individual tier.
-5. **Zero-friction GTM**: Biggest adoption hurdle is setup friction, not price. `npx` command must auto-find ADB, auto-discover devices, work instantly.
+1. **Token bloat**: Base64 screenshots + JSON on every call. Mitigated with JPEG compression and image resizing.
+2. **Flutter debug-only**: Dart VM Service Protocol stripped from Release builds. Use ADB accessibility tree for release apps.
+3. **iOS maintenance**: Apple breaks idevice protocols with iOS updates. iOS simulators supported; physical devices pending.
 
 ## Tech Stack
 
@@ -212,21 +210,8 @@ test-logs/                    # E2E test results and performance logs
 - `wait_for_settle` uses semantic-only hash (ignores bounds) for Flutter compatibility
 - `wait_for_element` polls for specific element by description — faster than generic settle
 
-## Target Customers
-
-1. **Individual mobile devs** ($15-30/mo) — using Claude Code, Cursor, Windsurf
-2. **Mobile QA teams** ($50-200/seat/mo) — replacing brittle Appium/Detox scripts
-3. **Enterprise** (custom) — CI/CD visual regression, multi-device orchestration
-
-## Competitive Landscape
-
-- `mobile-next/mobile-mcp` (3.9k stars) — most mature, but no AI visual analysis, no Flutter
-- `appium/appium-mcp` (242 stars) — comprehensive but requires Appium server, complex setup
-- `leancodepl/marionette_mcp` (190 stars) — Flutter-specific, no ADB device control
-- **Our differentiation**: Unified device control + AI vision + Flutter widget tree + companion app (23x faster UI tree) + multi-provider + zero-friction setup + performance optimization (local element search)
-
 ## Resuming Work
 
 When continuing on a new machine, tell Claude Code:
 
-> Pull https://github.com/saranshbamania/mobile-device-mcp and resume where I left off. Read CLAUDE.md for full context. Current status: Phase 1 (Android), Phase 2 (AI vision), and Phase 3 (Flutter widget tree) are complete and tested. Published to npm as v0.1.0. Next priorities are Phase 4 (iOS support) or Phase 5 (monetization). Check git log for recent changes.
+> Pull https://github.com/saranshbamania/mobile-device-mcp and resume where I left off. Read CLAUDE.md for full context. Check git log for recent changes.
