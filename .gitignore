@@ -3,6 +3,7 @@ dist/
 *.tsbuildinfo
 .env
 .env.local
+LAUNCH-PLAYBOOK.md
 .mcp.json
 bug-screenshots/
 smart-test*.mjs
