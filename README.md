@@ -141,7 +141,7 @@ Copy `.mcp.json` into any mobile project -- Flutter, React Native, Kotlin, Swift
 | `get_current_app` | Get the foreground app |
 | `get_logs` | Get logcat entries with filtering |
 
-### Pro (35 additional tools) -- [$9/mo](https://rzp.io/rzp/fCvY9mNK)
+### Pro (35 additional tools) -- [$6/mo](https://rzp.io/rzp/fCvY9mNK)
 
 **[Get Pro License](https://rzp.io/rzp/fCvY9mNK)** -- unlock all 49 tools. After payment, you'll receive a license key. Add it to your `.mcp.json`:
 
