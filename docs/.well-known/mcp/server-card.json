@@ -1,0 +1,23 @@
+{
+  "name": "mobile-device-mcp",
+  "description": "MCP server for controlling Android/iOS devices. Take screenshots, inspect UI, tap elements, run AI visual analysis, Flutter widget inspection, and more. 49 tools total.",
+  "version": "0.2.8",
+  "homepage": "https://github.com/saranshbamania/mobile-device-mcp",
+  "license": "BUSL-1.1",
+  "server": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "mobile-device-mcp"]
+  },
+  "tools": [
+    { "name": "list_devices", "description": "List all connected Android devices/emulators" },
+    { "name": "take_screenshot", "description": "Capture a screenshot of the device screen" },
+    { "name": "get_ui_elements", "description": "Get the accessibility/UI element tree as structured JSON" },
+    { "name": "tap", "description": "Tap at coordinates" },
+    { "name": "swipe", "description": "Swipe between two points" },
+    { "name": "type_text", "description": "Type text into the focused field" },
+    { "name": "smart_tap", "description": "Find an element by description and tap it (Pro)" },
+    { "name": "analyze_screen", "description": "AI describes the screen contents (Pro)" },
+    { "name": "flutter_get_widget_tree", "description": "Get Flutter widget tree with source locations (Pro)" }
+  ]
+}
